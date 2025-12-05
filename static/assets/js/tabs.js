@@ -2,10 +2,33 @@ window.addEventListener("load", () => {
   navigator.serviceWorker.register("../sw.js?v=6-17-2024", { scope: "/a/" });
   const form = document.getElementById("fs");
   const input = document.getElementById("is");
+  // Keyword shortcuts - type these to go directly to pages
+  const shortcuts = {
+    'home': '/',
+    'games': '/gm',
+    'game': '/gm',
+    'apps': '/as',
+    'app': '/as',
+    'settings': '/st',
+    'setting': '/st',
+    'tabs': '/ta',
+    'tab': '/ta',
+    'browser': '/ta',
+    'tools': '/ts',
+    'tool': '/ts'
+  };
+
   if (form && input) {
     form.addEventListener("submit", async event => {
       event.preventDefault();
       const formValue = input.value.trim();
+      
+      // Check for keyword shortcuts first
+      if (shortcuts[formValue.toLowerCase()]) {
+        window.location.href = shortcuts[formValue.toLowerCase()];
+        return;
+      }
+      
       const url = isUrl(formValue)
         ? prependHttps(formValue)
         : `https://duckduckgo.com/?q=${formValue}`;

@@ -17,8 +17,32 @@ if (form && input) {
     }
   });
 }
+// Keyword shortcuts - type these to go directly to pages
+const shortcuts = {
+  'home': '/',
+  'games': '/gm',
+  'game': '/gm',
+  'apps': '/as',
+  'app': '/as',
+  'settings': '/st',
+  'setting': '/st',
+  'tabs': '/ta',
+  'tab': '/ta',
+  'browser': '/ta',
+  'tools': '/ts',
+  'tool': '/ts'
+};
+
 function processUrl(value, path) {
-  let url = value.trim();
+  let url = value.trim().toLowerCase();
+  
+  // Check for keyword shortcuts first
+  if (shortcuts[url]) {
+    window.location.href = shortcuts[url];
+    return;
+  }
+  
+  url = value.trim(); // Reset to original case
   const engine = localStorage.getItem("engine");
   const searchUrl = engine ? engine : "https://duckduckgo.com/?q=";
 
