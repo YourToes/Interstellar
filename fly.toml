@@ -1,5 +1,5 @@
 app = "jhdsy2873443yinterstellar8327ye"
-primary_region = "dfw"
+primary_region = "ord"
 
 [env]
   PORT = "8080"
