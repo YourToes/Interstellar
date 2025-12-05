@@ -1,14 +1,20 @@
-FROM node:bookworm-slim
-ENV NODE_ENV=production
+FROM node:20-slim
 
 WORKDIR /app
 
-COPY ["package.json", "./"]
+# Copy package files first
+COPY package*.json ./
 
-RUN npm install
+# Install dependencies (not in production mode to get all deps)
+RUN npm install --omit=dev
 
+# Copy the rest of the app
 COPY . .
+
+# Set production mode
+ENV NODE_ENV=production
+ENV PORT=8080
 
 EXPOSE 8080
 
-CMD [ "node", "index.js" ]
+CMD ["node", "index.js"]

@@ -1,5 +1,5 @@
 app = "jhdsy2873443yinterstellar8327ye"
-primary_region = "ord"
+primary_region = "dfw"
 
 [env]
   PORT = "8080"
@@ -11,16 +11,9 @@ primary_region = "ord"
   auto_stop_machines = false
   auto_start_machines = true
   min_machines_running = 1
-  [http_service.concurrency]
-    type = "connections"
-    soft_limit = 1000
-    hard_limit = 1024
-
-[http_service.http_options]
-  h2_backend = true
 
 [[vm]]
   cpu_kind = "shared"
-  cpus = 2
-  memory_mb = 4096
+  cpus = 1
+  memory_mb = 512
 
