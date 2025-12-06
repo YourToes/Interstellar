@@ -36,6 +36,48 @@
         <p style="margin-top: 15px; color: rgba(255,255,255,0.5); font-size: 12px;">💡 Tip: Type <b>games</b>, <b>apps</b>, <b>home</b>, <b>settings</b>, or <b>browser</b> to navigate quickly</p>
       </div>
     </div>
+    <!-- PANIC BUTTON: Press ` or Escape to hide -->
+    <div id="panic-screen" style="display:none;position:fixed;top:0;left:0;right:0;bottom:0;z-index:999999;background:#fff;font-family:'Google Sans',Roboto,sans-serif;">
+      <div style="background:#1967d2;padding:12px 24px;display:flex;align-items:center;gap:16px;">
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="white"><path d="M12 3L1 9l4 2.18v6L12 21l7-3.82v-6l2-1.09V17h2V9L12 3zm6.82 6L12 12.72 5.18 9 12 5.28 18.82 9zM17 15.99l-5 2.73-5-2.73v-3.72L12 15l5-2.73v3.72z"/></svg>
+        <span style="color:white;font-size:22px;">Google Classroom</span>
+      </div>
+      <div style="padding:24px;max-width:1200px;margin:0 auto;">
+        <h1 style="font-size:24px;color:#202124;margin-bottom:24px;">To-do</h1>
+        <div style="border:1px solid #dadce0;border-radius:8px;padding:48px;text-align:center;color:#5f6368;">
+          <p style="font-size:16px;">No work due soon</p>
+          <p style="font-size:14px;margin-top:8px;">Enjoy your free time!</p>
+        </div>
+        <h2 style="font-size:18px;color:#202124;margin-top:32px;margin-bottom:16px;">Your classes</h2>
+        <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:16px;">
+          <div style="border:1px solid #dadce0;border-radius:8px;overflow:hidden;">
+            <div style="background:#1e8e3e;padding:16px;color:white;"><h3 style="font-size:18px;margin:0;">Mathematics</h3><p style="font-size:14px;opacity:0.9;margin:4px 0 0 0;">Period 3</p></div>
+            <div style="padding:16px;color:#5f6368;font-size:14px;">No new assignments</div>
+          </div>
+          <div style="border:1px solid #dadce0;border-radius:8px;overflow:hidden;">
+            <div style="background:#e8710a;padding:16px;color:white;"><h3 style="font-size:18px;margin:0;">English Language Arts</h3><p style="font-size:14px;opacity:0.9;margin:4px 0 0 0;">Period 5</p></div>
+            <div style="padding:16px;color:#5f6368;font-size:14px;">No new assignments</div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <script>
+      (function(){
+        var panicOn = false;
+        document.addEventListener('keydown', function(e) {
+          if (e.key === '`' || e.key === 'Escape') {
+            panicOn = true;
+            document.getElementById('panic-screen').style.display = 'block';
+            document.body.style.overflow = 'hidden';
+          }
+          if (e.key === 'Enter' && panicOn) {
+            panicOn = false;
+            document.getElementById('panic-screen').style.display = 'none';
+            document.body.style.overflow = '';
+          }
+        });
+      })();
+    </script>
     <script src="assets/js/index.js?v=46"></script>
     <script src="/assets/js/home.js?v=26"></script>
     <script src="./assets/-uv/bundle.js?v=6-17-2024"></script>
