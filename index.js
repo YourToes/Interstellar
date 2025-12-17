@@ -95,12 +95,19 @@ app.use(cookieParser());
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 
-// Enhanced CORS for games
+// Enhanced CORS for games - improved headers for game sites
 app.use((req, res, next) => {
+  // Allow all origins for game sites
   res.header('Access-Control-Allow-Origin', '*');
-  res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
-  res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization');
+  res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS, PATCH');
+  res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization, X-Frame-Options, Referer, User-Agent');
   res.header('Access-Control-Allow-Credentials', 'true');
+  res.header('Access-Control-Expose-Headers', 'Content-Length, Content-Type');
+  
+  // Additional headers for game compatibility
+  res.header('X-Content-Type-Options', 'nosniff');
+  res.header('Referrer-Policy', 'no-referrer-when-downgrade');
+  
   if (req.method === 'OPTIONS') {
     return res.sendStatus(200);
   }

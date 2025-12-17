@@ -75,8 +75,10 @@ document.addEventListener("DOMContentLoaded", event => {
     const newTab = document.createElement("li");
     const tabTitle = document.createElement("span");
     const newIframe = document.createElement("iframe");
+    // Enhanced sandbox permissions for game sites (CrazyGames, Poki, etc.)
     newIframe.sandbox =
-      "allow-same-origin allow-scripts allow-forms allow-pointer-lock allow-modals allow-orientation-lock";
+      "allow-same-origin allow-scripts allow-forms allow-pointer-lock allow-modals allow-orientation-lock allow-popups allow-popups-to-escape-sandbox allow-downloads allow-presentation";
+    newIframe.allow = "fullscreen; microphone; camera; autoplay; encrypted-media; picture-in-picture";
     // When Top Navigation is not allowed links with the "top" value will be entirely blocked, if we allow Top Navigation it will overwrite the tab, which is obviously not wanted.
     tabTitle.textContent = `New Tab ${tabCounter}`;
     tabTitle.className = "tab-title";
@@ -101,7 +103,15 @@ document.addEventListener("DOMContentLoaded", event => {
     newTab.classList.add("active");
     newIframe.dataset.tabId = tabCounter;
     newIframe.classList.add("active");
-    newIframe.addEventListener("load", () => {
+    // Timeout check - if iframe doesn't load in 15 seconds, show error (increased for game sites)
+    let loadTimeout;
+    let hasLoaded = false;
+    
+    const handleLoad = () => {
+      if (hasLoaded) return;
+      hasLoaded = true;
+      clearTimeout(loadTimeout);
+      
       try {
         const title = newIframe.contentDocument?.title || "";
         if (title.length <= 1) {
@@ -121,30 +131,34 @@ document.addEventListener("DOMContentLoaded", event => {
         }
         Load();
       } catch (e) {
-        // Cross-origin or error - show generic error page
-        showGenericError(newIframe, tabTitle);
+        // Cross-origin - this is normal for proxied sites, don't show error
+        // Only show error if it's actually a failure
+        console.log("Cross-origin iframe (normal for proxied sites)");
       }
-    });
+    };
     
     // Handle iframe errors to prevent URL exposure
     newIframe.addEventListener("error", () => {
-      showGenericError(newIframe, tabTitle);
-    });
-    
-    // Timeout check - if iframe doesn't load in 10 seconds, show error
-    const loadTimeout = setTimeout(() => {
-      try {
-        if (!newIframe.contentDocument || newIframe.contentDocument.readyState !== "complete") {
-          showGenericError(newIframe, tabTitle);
-        }
-      } catch (e) {
+      if (!hasLoaded) {
         showGenericError(newIframe, tabTitle);
       }
-    }, 10000);
+    });
     
-    newIframe.addEventListener("load", () => {
-      clearTimeout(loadTimeout);
-    }, { once: true });
+    newIframe.addEventListener("load", handleLoad);
+    
+    // Extended timeout for game sites (15 seconds instead of 10)
+    loadTimeout = setTimeout(() => {
+      if (!hasLoaded) {
+        try {
+          if (!newIframe.contentDocument || newIframe.contentDocument.readyState !== "complete") {
+            showGenericError(newIframe, tabTitle);
+          }
+        } catch (e) {
+          // Cross-origin is normal, don't show error
+          console.log("Timeout but cross-origin (may be normal)");
+        }
+      }
+    }, 15000);
     const goUrl = sessionStorage.getItem("GoUrl");
     const url = sessionStorage.getItem("URL");
 
