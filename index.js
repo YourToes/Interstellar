@@ -20,6 +20,7 @@ const bareServer = createBareServer("/ov/");
 const PORT = process.env.PORT || 8080;
 const cache = new Map();
 const CACHE_TTL = 30 * 24 * 60 * 60 * 1000; // Cache for 30 Days
+const MAX_CACHE_SIZE = 50; // Limit cache to 50 items to prevent memory bloat
 
 if (config.challenge) {
   console.log(
@@ -74,6 +75,12 @@ app.get("/e/*", async (req, res, next) => {
       ? "application/octet-stream"
       : mime.getType(ext);
 
+    // Limit cache size - remove oldest entries if cache is full
+    if (cache.size >= MAX_CACHE_SIZE) {
+      const oldestKey = cache.keys().next().value;
+      cache.delete(oldestKey);
+    }
+    
     cache.set(req.path, { data, contentType, timestamp: Date.now() });
     res.writeHead(200, { "Content-Type": contentType });
     res.end(data);
