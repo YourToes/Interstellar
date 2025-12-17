@@ -102,22 +102,49 @@ document.addEventListener("DOMContentLoaded", event => {
     newIframe.dataset.tabId = tabCounter;
     newIframe.classList.add("active");
     newIframe.addEventListener("load", () => {
-      const title = newIframe.contentDocument.title;
-      if (title.length <= 1) {
-        tabTitle.textContent = "";
-      } else {
-        tabTitle.textContent = title;
-      }
-      newIframe.contentWindow.open = url => {
-        sessionStorage.setItem("URL", `/a/${__uv$config.encodeUrl(url)}`);
-        createNewTab();
-        return null;
-      };
-      if (newIframe.contentDocument.documentElement.outerHTML.trim().length > 0) {
+      try {
+        const title = newIframe.contentDocument?.title || "";
+        if (title.length <= 1) {
+          tabTitle.textContent = "";
+        } else {
+          tabTitle.textContent = title;
+        }
+        if (newIframe.contentWindow) {
+          newIframe.contentWindow.open = url => {
+            sessionStorage.setItem("URL", `/a/${__uv$config.encodeUrl(url)}`);
+            createNewTab();
+            return null;
+          };
+        }
+        if (newIframe.contentDocument?.documentElement?.outerHTML?.trim().length > 0) {
+          Load();
+        }
         Load();
+      } catch (e) {
+        // Cross-origin or error - show generic error page
+        showGenericError(newIframe, tabTitle);
       }
-      Load();
     });
+    
+    // Handle iframe errors to prevent URL exposure
+    newIframe.addEventListener("error", () => {
+      showGenericError(newIframe, tabTitle);
+    });
+    
+    // Timeout check - if iframe doesn't load in 10 seconds, show error
+    const loadTimeout = setTimeout(() => {
+      try {
+        if (!newIframe.contentDocument || newIframe.contentDocument.readyState !== "complete") {
+          showGenericError(newIframe, tabTitle);
+        }
+      } catch (e) {
+        showGenericError(newIframe, tabTitle);
+      }
+    }, 10000);
+    
+    newIframe.addEventListener("load", () => {
+      clearTimeout(loadTimeout);
+    }, { once: true });
     const goUrl = sessionStorage.getItem("GoUrl");
     const url = sessionStorage.getItem("URL");
 
@@ -419,4 +446,76 @@ function decodeXor(input) {
       )
       .join("") + (search.length ? `?${search.join("?")}` : "")
   );
+}
+
+// Show generic error page instead of exposing URL
+function showGenericError(iframe, tabTitle) {
+  try {
+    // Replace iframe content with generic error page
+    const errorHTML = `
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <title>Game Unavailable</title>
+        <style>
+          body {
+            margin: 0;
+            padding: 0;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+            color: white;
+            text-align: center;
+          }
+          .error-container {
+            background: rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(10px);
+            padding: 40px;
+            border-radius: 20px;
+            max-width: 500px;
+          }
+          h1 { font-size: 48px; margin: 0 0 20px 0; }
+          p { font-size: 18px; margin: 10px 0; opacity: 0.9; }
+          button {
+            margin-top: 20px;
+            padding: 12px 30px;
+            background: white;
+            color: #667eea;
+            border: none;
+            border-radius: 25px;
+            font-size: 16px;
+            cursor: pointer;
+            font-weight: 600;
+          }
+          button:hover { transform: scale(1.05); }
+        </style>
+      </head>
+      <body>
+        <div class="error-container">
+          <h1>⚠️</h1>
+          <h2>Game Unavailable</h2>
+          <p>This game is currently unavailable or not working.</p>
+          <p>Please try a different game or check back later.</p>
+          <button onclick="window.location.href='/gm'">Go to Games</button>
+        </div>
+      </body>
+      </html>
+    `;
+    
+    // Write error page to iframe
+    iframe.srcdoc = errorHTML;
+    tabTitle.textContent = "Game Unavailable";
+    
+    // Clear the URL from address bar
+    if (document.getElementById("is")) {
+      document.getElementById("is").value = "";
+    }
+  } catch (e) {
+    console.error("Error showing generic error:", e);
+    // Fallback: redirect to home
+    iframe.src = "/";
+  }
 }
