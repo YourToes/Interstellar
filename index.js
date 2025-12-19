@@ -120,6 +120,17 @@ app.use((req, res, next) => {
   res.header('Cross-Origin-Opener-Policy', 'unsafe-none'); // Allow popups
   res.header('Cross-Origin-Resource-Policy', 'cross-origin'); // Allow cross-origin resources
   
+  // CRITICAL: Remove X-Frame-Options for game sites to allow nested iframes
+  // This is essential for CrazyGames/Poki games that load in nested iframes
+  res.removeHeader('X-Frame-Options');
+  
+  // Remove CSP headers that might block game resources
+  // The UV proxy will handle CSP rewriting, but we need to ensure nothing blocks it
+  if (req.url.includes('/a/') || req.url.includes('/ov/')) {
+    res.removeHeader('Content-Security-Policy');
+    res.removeHeader('Content-Security-Policy-Report-Only');
+  }
+  
   if (req.method === 'OPTIONS') {
     return res.sendStatus(200);
   }

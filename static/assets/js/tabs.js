@@ -90,14 +90,50 @@ document.addEventListener("DOMContentLoaded", event => {
     const newTab = document.createElement("li");
     const tabTitle = document.createElement("span");
     const newIframe = document.createElement("iframe");
-    // Enhanced sandbox permissions for game sites (CrazyGames, Poki, etc.)
-    // Removed sandbox restrictions that block games - games need full access
-    // Note: This is necessary for games to work properly
-    newIframe.sandbox =
-      "allow-same-origin allow-scripts allow-forms allow-pointer-lock allow-modals allow-orientation-lock allow-popups allow-popups-to-escape-sandbox allow-downloads allow-presentation allow-top-navigation-by-user-activation allow-top-navigation";
+    // CRITICAL FIX: Remove sandbox entirely for game sites to allow nested iframes
+    // CrazyGames games load in nested iframes that need full access
+    // Sandbox restrictions prevent nested iframes from loading properly
+    // Note: This is necessary for CrazyGames/Poki games to work
+    // Check if this is a game site - if so, remove sandbox completely
+    const checkGameSite = () => {
+      try {
+        const goUrl = sessionStorage.getItem("GoUrl");
+        const url = sessionStorage.getItem("URL");
+        const checkUrl = (goUrl || url || "").toLowerCase();
+        // Decode if it's encoded
+        let decodedUrl = checkUrl;
+        try {
+          if (checkUrl.includes("/a/")) {
+            decodedUrl = decodeURIComponent(checkUrl);
+          }
+        } catch (e) {
+          // Ignore decode errors
+        }
+        return decodedUrl.includes("crazygames") || 
+               decodedUrl.includes("poki") || 
+               decodedUrl.includes("game") ||
+               decodedUrl.includes("play") ||
+               decodedUrl.includes("html5.gamedistribution.com") ||
+               decodedUrl.includes("cdn.crazygames.com");
+      } catch (e) {
+        return false;
+      }
+    };
+    
+    // Only apply sandbox for non-game sites (security)
+    // For game sites, NO SANDBOX = allows nested iframes to work
+    if (!checkGameSite()) {
+      newIframe.sandbox =
+        "allow-same-origin allow-scripts allow-forms allow-pointer-lock allow-modals allow-orientation-lock allow-popups allow-popups-to-escape-sandbox allow-downloads allow-presentation allow-top-navigation-by-user-activation allow-top-navigation";
+    }
+    // For game sites: no sandbox attribute = full access for nested game iframes
+    
     newIframe.allow = "fullscreen; microphone; camera; autoplay; encrypted-media; picture-in-picture; geolocation; payment; usb; xr-spatial-tracking";
     newIframe.setAttribute("referrerpolicy", "no-referrer-when-downgrade");
     newIframe.setAttribute("loading", "eager"); // Load immediately for games
+    newIframe.setAttribute("allowfullscreen", "true");
+    newIframe.setAttribute("webkitallowfullscreen", "true");
+    newIframe.setAttribute("mozallowfullscreen", "true");
     // When Top Navigation is not allowed links with the "top" value will be entirely blocked, if we allow Top Navigation it will overwrite the tab, which is obviously not wanted.
     tabTitle.textContent = `New Tab ${tabCounter}`;
     tabTitle.className = "tab-title";
@@ -210,6 +246,12 @@ document.addEventListener("DOMContentLoaded", event => {
     }, 30000); // 30 seconds for game loading
     const goUrl = sessionStorage.getItem("GoUrl");
     const url = sessionStorage.getItem("URL");
+    
+    // Store the URL for sandbox detection
+    const targetUrl = url || goUrl;
+    if (targetUrl) {
+      newIframe.dataset.tabUrl = targetUrl;
+    }
 
     if (tabCounter === 0 || tabCounter === 1) {
       if (goUrl !== null) {
