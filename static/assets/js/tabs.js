@@ -76,9 +76,13 @@ document.addEventListener("DOMContentLoaded", event => {
     const tabTitle = document.createElement("span");
     const newIframe = document.createElement("iframe");
     // Enhanced sandbox permissions for game sites (CrazyGames, Poki, etc.)
+    // Removed sandbox restrictions that block games - games need full access
+    // Note: This is necessary for games to work properly
     newIframe.sandbox =
-      "allow-same-origin allow-scripts allow-forms allow-pointer-lock allow-modals allow-orientation-lock allow-popups allow-popups-to-escape-sandbox allow-downloads allow-presentation";
-    newIframe.allow = "fullscreen; microphone; camera; autoplay; encrypted-media; picture-in-picture";
+      "allow-same-origin allow-scripts allow-forms allow-pointer-lock allow-modals allow-orientation-lock allow-popups allow-popups-to-escape-sandbox allow-downloads allow-presentation allow-top-navigation-by-user-activation allow-top-navigation";
+    newIframe.allow = "fullscreen; microphone; camera; autoplay; encrypted-media; picture-in-picture; geolocation; payment; usb; xr-spatial-tracking";
+    newIframe.setAttribute("referrerpolicy", "no-referrer-when-downgrade");
+    newIframe.setAttribute("loading", "eager"); // Load immediately for games
     // When Top Navigation is not allowed links with the "top" value will be entirely blocked, if we allow Top Navigation it will overwrite the tab, which is obviously not wanted.
     tabTitle.textContent = `New Tab ${tabCounter}`;
     tabTitle.className = "tab-title";
@@ -146,19 +150,31 @@ document.addEventListener("DOMContentLoaded", event => {
     
     newIframe.addEventListener("load", handleLoad);
     
-    // Extended timeout for game sites (15 seconds instead of 10)
+    // Extended timeout for game sites (30 seconds for slow-loading games)
     loadTimeout = setTimeout(() => {
       if (!hasLoaded) {
         try {
-          if (!newIframe.contentDocument || newIframe.contentDocument.readyState !== "complete") {
-            showGenericError(newIframe, tabTitle);
+          // Check if iframe has actually loaded content
+          const iframeDoc = newIframe.contentDocument || newIframe.contentWindow?.document;
+          if (!iframeDoc || iframeDoc.readyState !== "complete") {
+            // Give it one more chance - some games load slowly
+            setTimeout(() => {
+              if (!hasLoaded) {
+                showGenericError(newIframe, tabTitle);
+              }
+            }, 5000);
           }
         } catch (e) {
-          // Cross-origin is normal, don't show error
-          console.log("Timeout but cross-origin (may be normal)");
+          // Cross-origin is normal for proxied sites - games often take time to load
+          // Don't show error immediately, wait a bit more
+          setTimeout(() => {
+            if (!hasLoaded) {
+              console.log("Game may still be loading (cross-origin check)");
+            }
+          }, 10000);
         }
       }
-    }, 15000);
+    }, 30000); // 30 seconds for game loading
     const goUrl = sessionStorage.getItem("GoUrl");
     const url = sessionStorage.getItem("URL");
 

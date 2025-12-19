@@ -13,11 +13,11 @@ primary_region = "dfw"
   min_machines_running = 0
   processes = ["app"]
   
-  # WebSocket support for games
+  # WebSocket support for games - increased limits for better game performance
   [http_service.concurrency]
-    type = "requests"
-    hard_limit = 25
-    soft_limit = 20
+    type = "connections"
+    hard_limit = 1024
+    soft_limit = 1000
 
 [experimental]
   auto_rollback = true

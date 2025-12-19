@@ -16,7 +16,15 @@ console.log(chalk.yellow("🚀 Starting server..."));
 const __dirname = process.cwd();
 const server = http.createServer();
 const app = express();
-const bareServer = createBareServer("/ov/");
+// Enhanced Bare Server configuration for WebSocket support
+const bareServer = createBareServer("/ov/", {
+  logErrors: false,
+  localAddress: undefined,
+  maintainer: {
+    email: "support@interstellar.network",
+    website: "https://interstellar.network"
+  }
+});
 const PORT = process.env.PORT || 8080;
 const cache = new Map();
 const CACHE_TTL = 30 * 24 * 60 * 60 * 1000; // Cache for 30 Days
@@ -95,18 +103,22 @@ app.use(cookieParser());
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 
-// Enhanced CORS for games - improved headers for game sites
+// Enhanced CORS for games - improved headers for game sites (CrazyGames, Poki, etc.)
 app.use((req, res, next) => {
   // Allow all origins for game sites
   res.header('Access-Control-Allow-Origin', '*');
-  res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS, PATCH');
-  res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization, X-Frame-Options, Referer, User-Agent');
+  res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS, PATCH, HEAD');
+  res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization, X-Frame-Options, Referer, User-Agent, Cache-Control, Pragma, If-Modified-Since, If-None-Match, Range, Accept-Ranges, Content-Range');
   res.header('Access-Control-Allow-Credentials', 'true');
-  res.header('Access-Control-Expose-Headers', 'Content-Length, Content-Type');
+  res.header('Access-Control-Expose-Headers', 'Content-Length, Content-Type, Content-Range, Accept-Ranges, ETag, Last-Modified');
+  res.header('Access-Control-Max-Age', '86400'); // Cache preflight for 24 hours
   
   // Additional headers for game compatibility
   res.header('X-Content-Type-Options', 'nosniff');
   res.header('Referrer-Policy', 'no-referrer-when-downgrade');
+  res.header('Cross-Origin-Embedder-Policy', 'unsafe-none'); // Allow game embeds
+  res.header('Cross-Origin-Opener-Policy', 'unsafe-none'); // Allow popups
+  res.header('Cross-Origin-Resource-Policy', 'cross-origin'); // Allow cross-origin resources
   
   if (req.method === 'OPTIONS') {
     return res.sendStatus(200);
@@ -152,18 +164,32 @@ app.use((err, req, res, next) => {
   res.status(500).sendFile(path.join(__dirname, "static", "404.html"));
 });
 
+// Enhanced request handling with better error handling
 server.on("request", (req, res) => {
   if (bareServer.shouldRoute(req)) {
-    bareServer.routeRequest(req, res);
+    try {
+      bareServer.routeRequest(req, res);
+    } catch (error) {
+      console.error("Bare Server request error:", error);
+      res.writeHead(500, { "Content-Type": "text/plain" });
+      res.end("Proxy error occurred");
+    }
   } else {
     app(req, res);
   }
 });
 
+// Enhanced WebSocket upgrade handling for game sites
 server.on("upgrade", (req, socket, head) => {
   if (bareServer.shouldRoute(req)) {
-    bareServer.routeUpgrade(req, socket, head);
+    try {
+      bareServer.routeUpgrade(req, socket, head);
+    } catch (error) {
+      console.error("WebSocket upgrade error:", error);
+      socket.end();
+    }
   } else {
+    // Allow WebSocket upgrades for other paths if needed
     socket.end();
   }
 });
