@@ -168,55 +168,58 @@ document.addEventListener("DOMContentLoaded", event => {
         } else {
           tabTitle.textContent = title;
         }
-        
-        // CRITICAL: Intercept window.open to proxy nested iframes for games
         if (newIframe.contentWindow) {
-          const originalOpen = newIframe.contentWindow.open;
-          newIframe.contentWindow.open = function(url, target, features) {
-            if (url && typeof url === 'string') {
-              // If it's a game URL, proxy it
-              if (url.includes('gamedistribution.com') || url.includes('crazygames.com')) {
-                const proxiedUrl = `/a/${__uv$config.encodeUrl(url)}`;
-                sessionStorage.setItem("URL", proxiedUrl);
-                createNewTab();
-                return null;
-              }
-              // Proxy all URLs
-              const proxiedUrl = `/a/${__uv$config.encodeUrl(url)}`;
-              sessionStorage.setItem("URL", proxiedUrl);
-              createNewTab();
-              return null;
-            }
-            return originalOpen ? originalOpen.call(this, url, target, features) : null;
+          // Intercept window.open for game sites
+          newIframe.contentWindow.open = url => {
+            sessionStorage.setItem("URL", `/a/${__uv$config.encodeUrl(url)}`);
+            createNewTab();
+            return null;
           };
           
-          // CRITICAL: Intercept iframe creation inside the proxied page
-          // This ensures nested game iframes are also proxied
+          // CRITICAL: Intercept iframe creation inside CrazyGames pages
+          // This ensures nested game iframes are proxied
           try {
             const iframeProto = newIframe.contentWindow.HTMLIFrameElement?.prototype;
-            if (iframeProto) {
-              const originalSrcSetter = Object.getOwnPropertyDescriptor(iframeProto, 'src')?.set;
-              if (originalSrcSetter) {
-                Object.defineProperty(iframeProto, 'src', {
-                  set: function(value) {
-                    if (value && typeof value === 'string' && !value.startsWith(window.location.origin)) {
-                      // Proxy the iframe src if it's not already proxied
-                      if (!value.includes('/a/')) {
-                        value = `/a/${__uv$config.encodeUrl(value)}`;
+            if (iframeProto && newIframe.contentWindow.document) {
+              // Intercept createElement for iframes
+              const originalCreateElement = newIframe.contentWindow.document.createElement;
+              newIframe.contentWindow.document.createElement = function(tagName, options) {
+                const element = originalCreateElement.call(this, tagName, options);
+                if (tagName.toLowerCase() === 'iframe') {
+                  // Intercept src setter for dynamically created iframes
+                  let iframeSrc = '';
+                  Object.defineProperty(element, 'src', {
+                    get: function() {
+                      return iframeSrc;
+                    },
+                    set: function(value) {
+                      iframeSrc = value;
+                      // If it's a game URL, proxy it
+                      if (value && typeof value === 'string') {
+                        if (value.includes('gamedistribution.com') || 
+                            value.includes('crazygames.com') ||
+                            !value.startsWith(window.location.origin)) {
+                          // Proxy the iframe src
+                          if (!value.includes('/a/')) {
+                            const proxiedUrl = `/a/${__uv$config.encodeUrl(value)}`;
+                            element.setAttribute('src', proxiedUrl);
+                            return;
+                          }
+                        }
                       }
-                    }
-                    originalSrcSetter.call(this, value);
-                  },
-                  get: Object.getOwnPropertyDescriptor(iframeProto, 'src')?.get,
-                  configurable: true
-                });
-              }
+                      element.setAttribute('src', value);
+                    },
+                    configurable: true,
+                    enumerable: true
+                  });
+                }
+                return element;
+              };
             }
           } catch (e) {
-            console.log("Could not intercept iframe src (may be cross-origin):", e);
+            console.log("Could not intercept iframe creation (may be cross-origin):", e);
           }
         }
-        
         if (newIframe.contentDocument?.documentElement?.outerHTML?.trim().length > 0) {
           Load();
         }
@@ -326,6 +329,11 @@ document.addEventListener("DOMContentLoaded", event => {
       // Don't set up timeout at all for game sites
       loadTimeout = null;
       console.log("Game site detected - error handling disabled");
+      
+      // Set up monitoring for nested iframes after page loads
+      newIframe.addEventListener("load", () => {
+        setTimeout(monitorNestedIframes, 1000);
+      });
     } else {
       // Only set timeout for non-game sites
       loadTimeout = setTimeout(() => {
