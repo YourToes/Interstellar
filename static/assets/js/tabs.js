@@ -282,6 +282,29 @@ document.addEventListener("DOMContentLoaded", event => {
     // UV will automatically rewrite the URL if needed
     newIframe.src = finalUrl;
     
+    // CRITICAL: For game sites, access contentWindow/contentDocument IMMEDIATELY
+    // This forces UV to inject its handler into the proxied page
+    if (isGameSiteFinal) {
+      try {
+        // Access contentWindow to trigger UV injection
+        const win = newIframe.contentWindow;
+        if (win) {
+          console.log("✅ Accessed contentWindow - UV should inject");
+        }
+        // Also try contentDocument
+        try {
+          const doc = newIframe.contentDocument;
+          if (doc) {
+            console.log("✅ Accessed contentDocument - UV injected");
+          }
+        } catch (e) {
+          // Cross-origin - will be handled after load
+        }
+      } catch (e) {
+        console.log("Cannot access contentWindow yet:", e);
+      }
+    }
+    
     // If it's a game site, completely disable all error handling
     if (isGameSiteFinal) {
       // Remove any existing error listeners
