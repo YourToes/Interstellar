@@ -36,6 +36,21 @@ window.addEventListener("load", () => {
     });
   }
   function processUrl(url) {
+    // Check if YouTube/Google - show error immediately
+    if (isYouTubeOrGoogle(url)) {
+      const iframeContainer = document.getElementById("iframe-container");
+      const activeIframe = Array.from(iframeContainer.querySelectorAll("iframe")).find(
+        iframe => iframe.classList.contains("active"),
+      );
+      const activeTab = document.querySelector("#tab-list li.active");
+      const tabTitle = activeTab ? activeTab.querySelector(".tab-title") : null;
+      if (activeIframe && tabTitle) {
+        showYouTubeError(activeIframe, tabTitle);
+        input.value = "";
+        return;
+      }
+    }
+    
     sessionStorage.setItem("GoUrl", __uv$config.encodeUrl(url));
     const iframeContainer = document.getElementById("iframe-container");
     const activeIframe = Array.from(iframeContainer.querySelectorAll("iframe")).find(
@@ -144,7 +159,13 @@ document.addEventListener("DOMContentLoaded", event => {
     // Handle iframe errors to prevent URL exposure
     newIframe.addEventListener("error", () => {
       if (!hasLoaded) {
-        showGenericError(newIframe, tabTitle);
+        // Check if it's YouTube/Google
+        const tabUrl = newIframe.dataset.tabUrl || newIframe.src;
+        if (isYouTubeOrGoogle(tabUrl)) {
+          showYouTubeError(newIframe, tabTitle);
+        } else {
+          showGenericError(newIframe, tabTitle);
+        }
       }
     });
     
@@ -154,6 +175,13 @@ document.addEventListener("DOMContentLoaded", event => {
     loadTimeout = setTimeout(() => {
       if (!hasLoaded) {
         try {
+          // Check if it's YouTube/Google first
+          const tabUrl = newIframe.dataset.tabUrl || newIframe.src;
+          if (isYouTubeOrGoogle(tabUrl)) {
+            showYouTubeError(newIframe, tabTitle);
+            return;
+          }
+          
           // Check if iframe has actually loaded content
           const iframeDoc = newIframe.contentDocument || newIframe.contentWindow?.document;
           if (!iframeDoc || iframeDoc.readyState !== "complete") {
@@ -169,7 +197,12 @@ document.addEventListener("DOMContentLoaded", event => {
           // Don't show error immediately, wait a bit more
           setTimeout(() => {
             if (!hasLoaded) {
-              console.log("Game may still be loading (cross-origin check)");
+              const tabUrl = newIframe.dataset.tabUrl || newIframe.src;
+              if (isYouTubeOrGoogle(tabUrl)) {
+                showYouTubeError(newIframe, tabTitle);
+              } else {
+                console.log("Game may still be loading (cross-origin check)");
+              }
             }
           }, 10000);
         }
@@ -476,6 +509,126 @@ function decodeXor(input) {
       )
       .join("") + (search.length ? `?${search.join("?")}` : "")
   );
+}
+
+// Check if URL is YouTube or Google service
+function isYouTubeOrGoogle(url) {
+  if (!url) return false;
+  const urlLower = url.toLowerCase();
+  return urlLower.includes('youtube.com') || 
+         urlLower.includes('youtu.be') ||
+         urlLower.includes('google.com/video') ||
+         urlLower.includes('googlevideo.com');
+}
+
+// Show YouTube/Google error page with alternatives
+function showYouTubeError(iframe, tabTitle) {
+  try {
+    const errorHTML = `
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <title>Video Unavailable</title>
+        <style>
+          body {
+            margin: 0;
+            padding: 0;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(135deg, #ff0000 0%, #cc0000 100%);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+            color: white;
+            text-align: center;
+          }
+          .error-container {
+            background: rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(10px);
+            padding: 40px;
+            border-radius: 20px;
+            max-width: 600px;
+          }
+          h1 { font-size: 64px; margin: 0 0 20px 0; }
+          h2 { font-size: 28px; margin: 0 0 20px 0; }
+          p { font-size: 16px; margin: 10px 0; opacity: 0.9; line-height: 1.6; }
+          .alternatives {
+            margin-top: 30px;
+            padding-top: 30px;
+            border-top: 1px solid rgba(255,255,255,0.2);
+          }
+          .alt-link {
+            display: inline-block;
+            margin: 8px;
+            padding: 10px 20px;
+            background: rgba(255,255,255,0.2);
+            color: white;
+            text-decoration: none;
+            border-radius: 8px;
+            font-size: 14px;
+            transition: all 0.3s;
+          }
+          .alt-link:hover {
+            background: rgba(255,255,255,0.3);
+            transform: translateY(-2px);
+          }
+          button {
+            margin-top: 20px;
+            padding: 12px 30px;
+            background: white;
+            color: #ff0000;
+            border: none;
+            border-radius: 25px;
+            font-size: 16px;
+            cursor: pointer;
+            font-weight: 600;
+          }
+          button:hover { transform: scale(1.05); }
+          .info-box {
+            background: rgba(0,0,0,0.2);
+            padding: 15px;
+            border-radius: 10px;
+            margin-top: 20px;
+            font-size: 14px;
+          }
+        </style>
+      </head>
+      <body>
+        <div class="error-container">
+          <h1>📺</h1>
+          <h2>Video Unavailable</h2>
+          <p><strong>YouTube and Google Video services cannot be accessed through this proxy.</strong></p>
+          <p>This is due to DRM (Digital Rights Management) protection that prevents videos from being proxied.</p>
+          
+          <div class="info-box">
+            <p><strong>Why?</strong> YouTube uses Widevine DRM which requires direct browser access and cannot work through proxies.</p>
+          </div>
+          
+          <div class="alternatives">
+            <p><strong>Try these alternatives instead:</strong></p>
+            <a href="/a/https://www.dailymotion.com" class="alt-link">Dailymotion</a>
+            <a href="/a/https://www.vimeo.com" class="alt-link">Vimeo</a>
+            <a href="/a/https://www.twitch.tv" class="alt-link">Twitch</a>
+            <a href="/a/https://www.crazygames.com" class="alt-link">CrazyGames</a>
+            <a href="/a/https://www.poki.com" class="alt-link">Poki</a>
+          </div>
+          
+          <button onclick="window.location.href='/'">Go Home</button>
+        </div>
+      </body>
+      </html>
+    `;
+    
+    iframe.srcdoc = errorHTML;
+    tabTitle.textContent = "Video Unavailable";
+    
+    if (document.getElementById("is")) {
+      document.getElementById("is").value = "";
+    }
+  } catch (e) {
+    console.error("Error showing YouTube error:", e);
+    iframe.src = "/";
+  }
 }
 
 // Show generic error page instead of exposing URL
