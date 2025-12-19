@@ -246,12 +246,6 @@ document.addEventListener("DOMContentLoaded", event => {
     }, 30000); // 30 seconds for game loading
     const goUrl = sessionStorage.getItem("GoUrl");
     const url = sessionStorage.getItem("URL");
-    
-    // Store the URL for sandbox detection
-    const targetUrl = url || goUrl;
-    if (targetUrl) {
-      newIframe.dataset.tabUrl = targetUrl;
-    }
 
     if (tabCounter === 0 || tabCounter === 1) {
       if (goUrl !== null) {
