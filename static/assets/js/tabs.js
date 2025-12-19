@@ -165,7 +165,9 @@ document.addEventListener("DOMContentLoaded", event => {
     const handleLoad = () => {
       if (hasLoaded) return;
       hasLoaded = true;
-      clearTimeout(loadTimeout);
+      if (loadTimeout) {
+        clearTimeout(loadTimeout);
+      }
       
       try {
         const title = newIframe.contentDocument?.title || "";
@@ -186,9 +188,9 @@ document.addEventListener("DOMContentLoaded", event => {
         }
         Load();
       } catch (e) {
-        // Cross-origin - this is normal for proxied sites, don't show error
-        // Only show error if it's actually a failure
-        console.log("Cross-origin iframe (normal for proxied sites)");
+        // Cross-origin - this is normal for proxied sites, especially games
+        // Don't show error - games often have cross-origin restrictions
+        console.log("Cross-origin iframe (normal for proxied sites/games)");
       }
     };
     
