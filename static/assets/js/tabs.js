@@ -168,13 +168,55 @@ document.addEventListener("DOMContentLoaded", event => {
         } else {
           tabTitle.textContent = title;
         }
+        
+        // CRITICAL: Intercept window.open to proxy nested iframes for games
         if (newIframe.contentWindow) {
-          newIframe.contentWindow.open = url => {
-            sessionStorage.setItem("URL", `/a/${__uv$config.encodeUrl(url)}`);
-            createNewTab();
-            return null;
+          const originalOpen = newIframe.contentWindow.open;
+          newIframe.contentWindow.open = function(url, target, features) {
+            if (url && typeof url === 'string') {
+              // If it's a game URL, proxy it
+              if (url.includes('gamedistribution.com') || url.includes('crazygames.com')) {
+                const proxiedUrl = `/a/${__uv$config.encodeUrl(url)}`;
+                sessionStorage.setItem("URL", proxiedUrl);
+                createNewTab();
+                return null;
+              }
+              // Proxy all URLs
+              const proxiedUrl = `/a/${__uv$config.encodeUrl(url)}`;
+              sessionStorage.setItem("URL", proxiedUrl);
+              createNewTab();
+              return null;
+            }
+            return originalOpen ? originalOpen.call(this, url, target, features) : null;
           };
+          
+          // CRITICAL: Intercept iframe creation inside the proxied page
+          // This ensures nested game iframes are also proxied
+          try {
+            const iframeProto = newIframe.contentWindow.HTMLIFrameElement?.prototype;
+            if (iframeProto) {
+              const originalSrcSetter = Object.getOwnPropertyDescriptor(iframeProto, 'src')?.set;
+              if (originalSrcSetter) {
+                Object.defineProperty(iframeProto, 'src', {
+                  set: function(value) {
+                    if (value && typeof value === 'string' && !value.startsWith(window.location.origin)) {
+                      // Proxy the iframe src if it's not already proxied
+                      if (!value.includes('/a/')) {
+                        value = `/a/${__uv$config.encodeUrl(value)}`;
+                      }
+                    }
+                    originalSrcSetter.call(this, value);
+                  },
+                  get: Object.getOwnPropertyDescriptor(iframeProto, 'src')?.get,
+                  configurable: true
+                });
+              }
+            }
+          } catch (e) {
+            console.log("Could not intercept iframe src (may be cross-origin):", e);
+          }
         }
+        
         if (newIframe.contentDocument?.documentElement?.outerHTML?.trim().length > 0) {
           Load();
         }
