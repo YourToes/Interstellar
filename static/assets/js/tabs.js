@@ -192,58 +192,86 @@ document.addEventListener("DOMContentLoaded", event => {
       }
     };
     
-    // Handle iframe errors to prevent URL exposure
-    newIframe.addEventListener("error", () => {
-      if (!hasLoaded) {
-        // Check if it's YouTube/Google
-        const tabUrl = newIframe.dataset.tabUrl || newIframe.src;
-        if (isYouTubeOrGoogle(tabUrl)) {
-          showYouTubeError(newIframe, tabTitle);
-        } else {
-          showGenericError(newIframe, tabTitle);
-        }
+    // Check if this is a game site to disable error detection
+    const isGameSiteUrl = (url) => {
+      try {
+        const urlLower = (url || "").toLowerCase();
+        let decodedUrl = urlLower;
+        try {
+          if (urlLower.includes("/a/")) {
+            decodedUrl = decodeURIComponent(urlLower);
+          }
+        } catch (e) {}
+        return decodedUrl.includes("crazygames") || 
+               decodedUrl.includes("poki") || 
+               decodedUrl.includes("html5.gamedistribution.com") ||
+               decodedUrl.includes("cdn.crazygames.com") ||
+               decodedUrl.includes("gamedistribution.com");
+      } catch (e) {
+        return false;
       }
-    });
+    };
+    
+    const tabUrl = newIframe.dataset.tabUrl || newIframe.src || "";
+    const isGameSite = isGameSiteUrl(tabUrl);
+    
+    // CRITICAL FIX: Don't show errors for game sites - games load slowly and cross-origin blocks detection
+    // Only handle errors for non-game sites
+    if (!isGameSite) {
+      newIframe.addEventListener("error", () => {
+        if (!hasLoaded) {
+          // Check if it's YouTube/Google
+          if (isYouTubeOrGoogle(tabUrl)) {
+            showYouTubeError(newIframe, tabTitle);
+          } else {
+            showGenericError(newIframe, tabTitle);
+          }
+        }
+      });
+    }
     
     newIframe.addEventListener("load", handleLoad);
     
-    // Extended timeout for game sites (30 seconds for slow-loading games)
-    loadTimeout = setTimeout(() => {
-      if (!hasLoaded) {
-        try {
-          // Check if it's YouTube/Google first
-          const tabUrl = newIframe.dataset.tabUrl || newIframe.src;
-          if (isYouTubeOrGoogle(tabUrl)) {
-            showYouTubeError(newIframe, tabTitle);
-            return;
-          }
-          
-          // Check if iframe has actually loaded content
-          const iframeDoc = newIframe.contentDocument || newIframe.contentWindow?.document;
-          if (!iframeDoc || iframeDoc.readyState !== "complete") {
-            // Give it one more chance - some games load slowly
+    // CRITICAL FIX: Disable timeout errors for game sites
+    // Games load slowly and cross-origin prevents proper detection
+    // Only use timeout for non-game sites
+    if (!isGameSite) {
+      // Extended timeout for non-game sites (30 seconds)
+      loadTimeout = setTimeout(() => {
+        if (!hasLoaded) {
+          try {
+            // Check if it's YouTube/Google first
+            if (isYouTubeOrGoogle(tabUrl)) {
+              showYouTubeError(newIframe, tabTitle);
+              return;
+            }
+            
+            // Check if iframe has actually loaded content
+            const iframeDoc = newIframe.contentDocument || newIframe.contentWindow?.document;
+            if (!iframeDoc || iframeDoc.readyState !== "complete") {
+              // Give it one more chance
+              setTimeout(() => {
+                if (!hasLoaded) {
+                  showGenericError(newIframe, tabTitle);
+                }
+              }, 5000);
+            }
+          } catch (e) {
+            // Cross-origin is normal for proxied sites
             setTimeout(() => {
               if (!hasLoaded) {
-                showGenericError(newIframe, tabTitle);
+                if (isYouTubeOrGoogle(tabUrl)) {
+                  showYouTubeError(newIframe, tabTitle);
+                } else {
+                  showGenericError(newIframe, tabTitle);
+                }
               }
-            }, 5000);
+            }, 10000);
           }
-        } catch (e) {
-          // Cross-origin is normal for proxied sites - games often take time to load
-          // Don't show error immediately, wait a bit more
-          setTimeout(() => {
-            if (!hasLoaded) {
-              const tabUrl = newIframe.dataset.tabUrl || newIframe.src;
-              if (isYouTubeOrGoogle(tabUrl)) {
-                showYouTubeError(newIframe, tabTitle);
-              } else {
-                console.log("Game may still be loading (cross-origin check)");
-              }
-            }
-          }, 10000);
         }
-      }
-    }, 30000); // 30 seconds for game loading
+      }, 30000);
+    }
+    // For game sites: NO timeout = games can load as long as they need
     const goUrl = sessionStorage.getItem("GoUrl");
     const url = sessionStorage.getItem("URL");
 
