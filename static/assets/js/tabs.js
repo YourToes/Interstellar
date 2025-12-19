@@ -313,8 +313,51 @@ document.addEventListener("DOMContentLoaded", event => {
       loadTimeout = null;
       console.log("Game site detected - error handling disabled");
       
-      // CRITICAL: Aggressive iframe interception - rewrite ALL iframe srcs immediately
-      // Don't wait for UV - just rewrite using parent window's UV config
+      // CRITICAL: Hook into HTMLIFrameElement.prototype BEFORE any iframes are created
+      // This intercepts iframe creation at the browser level
+      try {
+        const iframeWin = newIframe.contentWindow;
+        if (iframeWin && iframeWin.HTMLIFrameElement) {
+          // Override HTMLIFrameElement constructor in the proxied page
+          const originalIframeProto = iframeWin.HTMLIFrameElement.prototype;
+          const originalSrcDescriptor = Object.getOwnPropertyDescriptor(originalIframeProto, 'src');
+          
+          if (originalSrcDescriptor) {
+            Object.defineProperty(originalIframeProto, 'src', {
+              get: originalSrcDescriptor.get,
+              set: function(value) {
+                if (value && typeof value === 'string' && 
+                    !value.includes('/a/') && 
+                    !value.startsWith(window.location.origin) &&
+                    !value.startsWith('data:') &&
+                    !value.startsWith('blob:') &&
+                    (value.includes('gamedistribution.com') || 
+                     value.includes('html5.gamedistribution.com') ||
+                     value.includes('cdn.crazygames.com'))) {
+                  // Rewrite using parent window's UV config
+                  try {
+                    const proxiedUrl = `/a/${window.parent.__uv$config.encodeUrl(value)}`;
+                    originalSrcDescriptor.set.call(this, proxiedUrl);
+                    this.removeAttribute('sandbox');
+                    console.log("✅ PROTOTYPE INTERCEPT:", value.substring(0, 60), "->", proxiedUrl.substring(0, 60));
+                    return;
+                  } catch (e) {
+                    console.error("Error in prototype intercept:", e);
+                  }
+                }
+                originalSrcDescriptor.set.call(this, value);
+              },
+              configurable: true,
+              enumerable: originalSrcDescriptor.enumerable
+            });
+            console.log("✅ Hooked into HTMLIFrameElement.prototype.src");
+          }
+        }
+      } catch (e) {
+        console.log("Cannot hook into iframe prototype (cross-origin):", e);
+      }
+      
+      // Also set up MutationObserver as backup
       const rewriteIframeSrc = (iframe) => {
         try {
           const src = iframe.getAttribute('src') || iframe.src;
@@ -325,30 +368,24 @@ document.addEventListener("DOMContentLoaded", event => {
               !src.startsWith('blob:') &&
               (src.includes('gamedistribution.com') || 
                src.includes('html5.gamedistribution.com') ||
-               src.includes('cdn.crazygames.com') ||
-               src.includes('crazygames.com'))) {
-            // Use parent window's UV config to encode
+               src.includes('cdn.crazygames.com'))) {
             const proxiedUrl = `/a/${__uv$config.encodeUrl(src)}`;
             iframe.src = proxiedUrl;
             iframe.setAttribute('src', proxiedUrl);
             iframe.removeAttribute('sandbox');
-            console.log("✅ REWROTE IFRAME:", src.substring(0, 60), "->", proxiedUrl.substring(0, 60));
-            return true;
+            console.log("✅ MUTATION OBSERVER REWROTE:", src.substring(0, 60));
           }
         } catch (e) {
           console.error("Error rewriting iframe:", e);
         }
-        return false;
       };
       
-      // Set up MutationObserver IMMEDIATELY - don't wait for load
       const setupObserver = () => {
         try {
           const iframeWin = newIframe.contentWindow;
           const iframeDoc = iframeWin?.document;
           
           if (iframeDoc) {
-            // Watch for new iframes
             const observer = new MutationObserver((mutations) => {
               mutations.forEach((mutation) => {
                 mutation.addedNodes.forEach((node) => {
@@ -379,42 +416,27 @@ document.addEventListener("DOMContentLoaded", event => {
               bodyObserver.observe(iframeDoc.documentElement, { childList: true });
             }
             
-            // Rewrite existing iframes immediately
             try {
               const existingIframes = iframeDoc.querySelectorAll('iframe');
               existingIframes.forEach(rewriteIframeSrc);
             } catch (e) {}
-            
-            console.log("✅ Aggressive iframe observer active");
           }
         } catch (e) {
-          // Cross-origin - will retry after load
+          // Cross-origin
         }
       };
       
-      // Try immediately
-      setupObserver();
-      
-      // Also try after load
+      // Try immediately and after load
       newIframe.addEventListener("load", () => {
-        setTimeout(setupObserver, 500);
-        setTimeout(setupObserver, 2000);
-        setTimeout(setupObserver, 5000);
+        setTimeout(setupObserver, 100);
+        setTimeout(setupObserver, 1000);
+        setTimeout(setupObserver, 3000);
       });
       
-      // Also intercept at the iframe element level - watch for src attribute changes
-      let lastSrc = newIframe.src;
-      const srcObserver = new MutationObserver(() => {
-        const currentSrc = newIframe.src;
-        if (currentSrc !== lastSrc) {
-          lastSrc = currentSrc;
-          // Check if this is a game iframe that needs rewriting
-          if (currentSrc.includes('gamedistribution.com') || currentSrc.includes('html5.gamedistribution.com')) {
-            rewriteIframeSrc(newIframe);
-          }
-        }
-      });
-      srcObserver.observe(newIframe, { attributes: true, attributeFilter: ['src'] });
+      // Also try immediately
+      try {
+        setupObserver();
+      } catch (e) {}
     } else {
       // Only set timeout for non-game sites
       loadTimeout = setTimeout(() => {
