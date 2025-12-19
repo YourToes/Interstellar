@@ -313,17 +313,53 @@ document.addEventListener("DOMContentLoaded", event => {
       loadTimeout = null;
       console.log("Game site detected - error handling disabled");
       
-      // CRITICAL: Parent-level MutationObserver to catch ALL iframes in proxied page
-      // This works even with cross-origin restrictions
+      // CRITICAL: Inject UV handler scripts into proxied page so UV can intercept iframe creation
+      // UV's handler hooks into HTMLIFrameElement.prototype.src, but only if UV is loaded in that context
       newIframe.addEventListener("load", () => {
-        // Wait a bit for page to start loading
         setTimeout(() => {
           try {
             const iframeWin = newIframe.contentWindow;
             const iframeDoc = iframeWin?.document;
             
-            if (iframeDoc) {
-              // Function to rewrite iframe src using parent window's UV config
+            if (iframeDoc && iframeDoc.head) {
+              // Check if UV is already loaded
+              if (!iframeWin.__uv && !iframeWin.__uv$config) {
+                console.log("UV not detected in proxied page - injecting UV scripts");
+                
+                // Inject UV config first
+                const configScript = iframeDoc.createElement('script');
+                configScript.textContent = `
+                  self.__uv$config = {
+                    prefix: "/a/",
+                    bare: "/ov/",
+                    encodeUrl: Ultraviolet.codec.xor.encode,
+                    decodeUrl: Ultraviolet.codec.xor.decode,
+                    handler: "/assets/-uv/handler.js?v=6-17-2024",
+                    bundle: "/assets/-uv/bundle.js?v=6-17-2024",
+                    config: "/assets/-uv/config.js?v=6-17-2024",
+                    sw: "/assets/-uv/sw.js?v=6-17-2024",
+                  };
+                `;
+                iframeDoc.head.appendChild(configScript);
+                
+                // Inject UV bundle
+                const bundleScript = iframeDoc.createElement('script');
+                bundleScript.src = '/assets/-uv/bundle.js?v=6-17-2024';
+                bundleScript.onload = () => {
+                  // Inject UV handler after bundle loads
+                  const handlerScript = iframeDoc.createElement('script');
+                  handlerScript.src = '/assets/-uv/handler.js?v=6-17-2024';
+                  handlerScript.onload = () => {
+                    console.log("✅ UV handler injected into proxied page");
+                  };
+                  iframeDoc.head.appendChild(handlerScript);
+                };
+                iframeDoc.head.appendChild(bundleScript);
+              } else {
+                console.log("✅ UV already loaded in proxied page");
+              }
+              
+              // Also set up MutationObserver to catch iframes and rewrite them manually
               const rewriteIframeSrc = (iframe) => {
                 try {
                   const src = iframe.getAttribute('src') || iframe.src;
@@ -340,52 +376,35 @@ document.addEventListener("DOMContentLoaded", event => {
                     iframe.src = proxiedUrl;
                     iframe.setAttribute('src', proxiedUrl);
                     iframe.removeAttribute('sandbox');
-                    console.log("✅ Parent-level rewrite:", src.substring(0, 60), "->", proxiedUrl.substring(0, 60));
-                    
-                    // Force UV injection by accessing contentWindow/contentDocument
-                    try {
-                      const nestedWin = iframe.contentWindow;
-                      const nestedDoc = iframe.contentDocument;
-                      if (nestedWin || nestedDoc) {
-                        console.log("✅ Forced UV injection into nested iframe");
-                      }
-                    } catch (e) {
-                      // Cross-origin - UV will handle it
-                    }
+                    console.log("✅ Rewrote iframe src:", src.substring(0, 60), "->", proxiedUrl.substring(0, 60));
                   }
                 } catch (e) {
                   console.error("Error rewriting iframe:", e);
                 }
               };
               
-              // Watch for new iframes being added
+              // Watch for new iframes
               const observer = new MutationObserver((mutations) => {
                 mutations.forEach((mutation) => {
                   mutation.addedNodes.forEach((node) => {
                     if (node.nodeType === 1) {
-                      // Direct iframe
                       if (node.tagName && node.tagName.toLowerCase() === 'iframe') {
                         rewriteIframeSrc(node);
                       }
-                      // Nested iframes
                       if (node.querySelectorAll) {
                         try {
                           const iframes = node.querySelectorAll('iframe');
                           iframes.forEach(rewriteIframeSrc);
-                        } catch (e) {
-                          // Some nodes don't support querySelectorAll
-                        }
+                        } catch (e) {}
                       }
                     }
                   });
                 });
               });
               
-              // Start observing
               if (iframeDoc.body) {
                 observer.observe(iframeDoc.body, { childList: true, subtree: true });
               } else {
-                // Wait for body
                 const bodyObserver = new MutationObserver(() => {
                   if (iframeDoc.body) {
                     observer.observe(iframeDoc.body, { childList: true, subtree: true });
@@ -395,51 +414,19 @@ document.addEventListener("DOMContentLoaded", event => {
                 bodyObserver.observe(iframeDoc.documentElement, { childList: true });
               }
               
-              // Also rewrite existing iframes
+              // Rewrite existing iframes
               try {
                 const existingIframes = iframeDoc.querySelectorAll('iframe');
                 existingIframes.forEach(rewriteIframeSrc);
-              } catch (e) {
-                // Cross-origin
-              }
+              } catch (e) {}
               
-              console.log("✅ Parent-level iframe observer active");
+              console.log("✅ Iframe observer active");
             }
           } catch (e) {
-            console.log("Cannot set up parent-level observer (cross-origin):", e);
-            
-            // Fallback: Watch the iframe element itself for src changes
-            let lastSrc = newIframe.src;
-            const srcObserver = new MutationObserver(() => {
-              const currentSrc = newIframe.src;
-              if (currentSrc !== lastSrc) {
-                lastSrc = currentSrc;
-                // If src changed to a game URL, UV should handle it
-                console.log("Iframe src changed:", currentSrc.substring(0, 60));
-              }
-            });
-            srcObserver.observe(newIframe, { attributes: true, attributeFilter: ['src'] });
+            console.log("Cannot inject UV scripts (cross-origin):", e);
           }
-        }, 2000); // Wait 2 seconds for page to load
+        }, 1000);
       });
-      
-      // Also set up immediate observer before page loads
-      try {
-        const iframeWin = newIframe.contentWindow;
-        if (iframeWin) {
-          // Try to access document immediately to trigger UV injection
-          try {
-            const doc = iframeWin.document;
-            if (doc) {
-              console.log("✅ Early document access - UV should inject");
-            }
-          } catch (e) {
-            // Cross-origin - will be handled after load
-          }
-        }
-      } catch (e) {
-        // Ignore
-      }
     } else {
       // Only set timeout for non-game sites
       loadTimeout = setTimeout(() => {
