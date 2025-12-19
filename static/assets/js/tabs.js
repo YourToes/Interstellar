@@ -195,7 +195,7 @@ document.addEventListener("DOMContentLoaded", event => {
     };
     
     // Check if this is a game site to disable error detection
-    const isGameSiteUrl = (url) => {
+    function isGameSiteUrl(url) {
       try {
         const urlLower = (url || "").toLowerCase();
         let decodedUrl = urlLower;
@@ -212,38 +212,92 @@ document.addEventListener("DOMContentLoaded", event => {
       } catch (e) {
         return false;
       }
-    };
+    }
     
-    const tabUrl = newIframe.dataset.tabUrl || newIframe.src || "";
-    const isGameSite = isGameSiteUrl(tabUrl);
+    // Will be set after URL is determined
+    let isGameSite = false;
     
     // CRITICAL FIX: Don't show errors for game sites - games load slowly and cross-origin blocks detection
-    // Only handle errors for non-game sites
-    if (!isGameSite) {
-      newIframe.addEventListener("error", () => {
-        if (!hasLoaded) {
-          // Check if it's YouTube/Google
-          if (isYouTubeOrGoogle(tabUrl)) {
-            showYouTubeError(newIframe, tabTitle);
-          } else {
-            showGenericError(newIframe, tabTitle);
-          }
+    // Only handle errors for non-game sites - but check will happen after URL is set
+    newIframe.addEventListener("error", () => {
+      if (!hasLoaded) {
+        // Check URL again at error time
+        const checkUrl = newIframe.dataset.tabUrl || newIframe.src || "";
+        if (isGameSiteUrl(checkUrl)) {
+          console.log("Game site - ignoring error");
+          return; // Don't show error for games
         }
-      });
-    }
+        // Check if it's YouTube/Google
+        if (isYouTubeOrGoogle(checkUrl)) {
+          showYouTubeError(newIframe, tabTitle);
+        } else {
+          showGenericError(newIframe, tabTitle);
+        }
+      }
+    });
     
     newIframe.addEventListener("load", handleLoad);
     
-    // CRITICAL FIX: Disable timeout errors for game sites
-    // Games load slowly and cross-origin prevents proper detection
-    // Only use timeout for non-game sites
-    if (!isGameSite) {
-      // Extended timeout for non-game sites (30 seconds)
+    // CRITICAL FIX: Timeout will be set AFTER URL is determined below
+    // This ensures we know if it's a game site before setting timeout
+    const goUrl = sessionStorage.getItem("GoUrl");
+    const url = sessionStorage.getItem("URL");
+    
+    // Set the URL in dataset BEFORE setting src so detection works
+    let finalUrl = "";
+    if (tabCounter === 0 || tabCounter === 1) {
+      if (goUrl !== null) {
+        if (goUrl.includes("/e/")) {
+          finalUrl = window.location.origin + goUrl;
+        } else {
+          finalUrl = `${window.location.origin}/a/${goUrl}`;
+        }
+        newIframe.dataset.tabUrl = goUrl; // Store original URL
+      } else {
+        finalUrl = "/";
+      }
+    } else if (tabCounter > 1) {
+      if (url !== null) {
+        finalUrl = window.location.origin + url;
+        newIframe.dataset.tabUrl = url; // Store original URL
+        sessionStorage.removeItem("URL");
+      } else if (goUrl !== null) {
+        if (goUrl.includes("/e/")) {
+          finalUrl = window.location.origin + goUrl;
+        } else {
+          finalUrl = `${window.location.origin}/a/${goUrl}`;
+        }
+        newIframe.dataset.tabUrl = goUrl; // Store original URL
+      } else {
+        finalUrl = "/";
+      }
+    }
+    
+    // Update game site detection with the actual URL
+    const isGameSiteFinal = isGameSiteUrl(finalUrl || newIframe.dataset.tabUrl || "");
+    
+    // Set src AFTER detection
+    newIframe.src = finalUrl;
+    
+    // If it's a game site, completely disable all error handling
+    if (isGameSiteFinal) {
+      // Remove any existing error listeners
+      newIframe.onerror = null;
+      // Don't set up timeout at all for game sites
+      loadTimeout = null;
+      console.log("Game site detected - error handling disabled");
+    } else {
+      // Only set timeout for non-game sites
       loadTimeout = setTimeout(() => {
         if (!hasLoaded) {
           try {
+            const checkUrl = newIframe.dataset.tabUrl || newIframe.src || "";
+            // Double-check it's not a game site
+            if (isGameSiteUrl(checkUrl)) {
+              return; // Don't show error
+            }
             // Check if it's YouTube/Google first
-            if (isYouTubeOrGoogle(tabUrl)) {
+            if (isYouTubeOrGoogle(checkUrl)) {
               showYouTubeError(newIframe, tabTitle);
               return;
             }
@@ -254,7 +308,10 @@ document.addEventListener("DOMContentLoaded", event => {
               // Give it one more chance
               setTimeout(() => {
                 if (!hasLoaded) {
-                  showGenericError(newIframe, tabTitle);
+                  const recheckUrl = newIframe.dataset.tabUrl || newIframe.src || "";
+                  if (!isGameSiteUrl(recheckUrl)) {
+                    showGenericError(newIframe, tabTitle);
+                  }
                 }
               }, 5000);
             }
@@ -262,7 +319,11 @@ document.addEventListener("DOMContentLoaded", event => {
             // Cross-origin is normal for proxied sites
             setTimeout(() => {
               if (!hasLoaded) {
-                if (isYouTubeOrGoogle(tabUrl)) {
+                const recheckUrl = newIframe.dataset.tabUrl || newIframe.src || "";
+                if (isGameSiteUrl(recheckUrl)) {
+                  return; // Don't show error for games
+                }
+                if (isYouTubeOrGoogle(recheckUrl)) {
                   showYouTubeError(newIframe, tabTitle);
                 } else {
                   showGenericError(newIframe, tabTitle);
@@ -272,34 +333,6 @@ document.addEventListener("DOMContentLoaded", event => {
           }
         }
       }, 30000);
-    }
-    // For game sites: NO timeout = games can load as long as they need
-    const goUrl = sessionStorage.getItem("GoUrl");
-    const url = sessionStorage.getItem("URL");
-
-    if (tabCounter === 0 || tabCounter === 1) {
-      if (goUrl !== null) {
-        if (goUrl.includes("/e/")) {
-          newIframe.src = window.location.origin + goUrl;
-        } else {
-          newIframe.src = `${window.location.origin}/a/${goUrl}`;
-        }
-      } else {
-        newIframe.src = "/";
-      }
-    } else if (tabCounter > 1) {
-      if (url !== null) {
-        newIframe.src = window.location.origin + url;
-        sessionStorage.removeItem("URL");
-      } else if (goUrl !== null) {
-        if (goUrl.includes("/e/")) {
-          newIframe.src = window.location.origin + goUrl;
-        } else {
-          newIframe.src = `${window.location.origin}/a/${goUrl}`;
-        }
-      } else {
-        newIframe.src = "/";
-      }
     }
 
     iframeContainer.appendChild(newIframe);
@@ -697,8 +730,41 @@ function showYouTubeError(iframe, tabTitle) {
   }
 }
 
+// Check if URL is a game site (used by error functions)
+function isGameSiteUrlCheck(url) {
+  try {
+    const urlLower = (url || "").toLowerCase();
+    let decodedUrl = urlLower;
+    try {
+      // Try to decode if it's encoded
+      if (urlLower.includes("/a/")) {
+        decodedUrl = decodeURIComponent(urlLower);
+      }
+      // Also check the actual URL path
+      if (urlLower.includes("crazygames") || urlLower.includes("poki")) {
+        return true;
+      }
+    } catch (e) {}
+    return decodedUrl.includes("crazygames") || 
+           decodedUrl.includes("poki") || 
+           decodedUrl.includes("html5.gamedistribution.com") ||
+           decodedUrl.includes("cdn.crazygames.com") ||
+           decodedUrl.includes("gamedistribution.com") ||
+           decodedUrl.includes("game") && (decodedUrl.includes("play") || decodedUrl.includes("html5"));
+  } catch (e) {
+    return false;
+  }
+}
+
 // Show generic error page instead of exposing URL
 function showGenericError(iframe, tabTitle) {
+  // CRITICAL: Check if this is a game site - NEVER show errors for games
+  const checkUrl = iframe.dataset.tabUrl || iframe.src || "";
+  if (isGameSiteUrlCheck(checkUrl)) {
+    console.log("Game site detected - skipping error page");
+    return; // DO NOTHING for game sites
+  }
+  
   try {
     // Replace iframe content with generic error page
     const errorHTML = `
