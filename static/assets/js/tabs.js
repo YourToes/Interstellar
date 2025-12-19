@@ -313,120 +313,108 @@ document.addEventListener("DOMContentLoaded", event => {
       loadTimeout = null;
       console.log("Game site detected - error handling disabled");
       
-      // CRITICAL: Inject UV handler scripts into proxied page so UV can intercept iframe creation
-      // UV's handler hooks into HTMLIFrameElement.prototype.src, but only if UV is loaded in that context
-      newIframe.addEventListener("load", () => {
-        setTimeout(() => {
-          try {
-            const iframeWin = newIframe.contentWindow;
-            const iframeDoc = iframeWin?.document;
-            
-            if (iframeDoc && iframeDoc.head) {
-              // Check if UV is already loaded
-              if (!iframeWin.__uv && !iframeWin.__uv$config) {
-                console.log("UV not detected in proxied page - injecting UV scripts");
-                
-                // Inject UV config first
-                const configScript = iframeDoc.createElement('script');
-                configScript.textContent = `
-                  self.__uv$config = {
-                    prefix: "/a/",
-                    bare: "/ov/",
-                    encodeUrl: Ultraviolet.codec.xor.encode,
-                    decodeUrl: Ultraviolet.codec.xor.decode,
-                    handler: "/assets/-uv/handler.js?v=6-17-2024",
-                    bundle: "/assets/-uv/bundle.js?v=6-17-2024",
-                    config: "/assets/-uv/config.js?v=6-17-2024",
-                    sw: "/assets/-uv/sw.js?v=6-17-2024",
-                  };
-                `;
-                iframeDoc.head.appendChild(configScript);
-                
-                // Inject UV bundle
-                const bundleScript = iframeDoc.createElement('script');
-                bundleScript.src = '/assets/-uv/bundle.js?v=6-17-2024';
-                bundleScript.onload = () => {
-                  // Inject UV handler after bundle loads
-                  const handlerScript = iframeDoc.createElement('script');
-                  handlerScript.src = '/assets/-uv/handler.js?v=6-17-2024';
-                  handlerScript.onload = () => {
-                    console.log("✅ UV handler injected into proxied page");
-                  };
-                  iframeDoc.head.appendChild(handlerScript);
-                };
-                iframeDoc.head.appendChild(bundleScript);
-              } else {
-                console.log("✅ UV already loaded in proxied page");
-              }
-              
-              // Also set up MutationObserver to catch iframes and rewrite them manually
-              const rewriteIframeSrc = (iframe) => {
-                try {
-                  const src = iframe.getAttribute('src') || iframe.src;
-                  if (src && typeof src === 'string' && 
-                      !src.includes('/a/') && 
-                      !src.startsWith(window.location.origin) &&
-                      !src.startsWith('data:') &&
-                      !src.startsWith('blob:') &&
-                      (src.includes('gamedistribution.com') || 
-                       src.includes('html5.gamedistribution.com') ||
-                       src.includes('cdn.crazygames.com'))) {
-                    // Use parent window's UV config to encode
-                    const proxiedUrl = `/a/${__uv$config.encodeUrl(src)}`;
-                    iframe.src = proxiedUrl;
-                    iframe.setAttribute('src', proxiedUrl);
-                    iframe.removeAttribute('sandbox');
-                    console.log("✅ Rewrote iframe src:", src.substring(0, 60), "->", proxiedUrl.substring(0, 60));
-                  }
-                } catch (e) {
-                  console.error("Error rewriting iframe:", e);
-                }
-              };
-              
-              // Watch for new iframes
-              const observer = new MutationObserver((mutations) => {
-                mutations.forEach((mutation) => {
-                  mutation.addedNodes.forEach((node) => {
-                    if (node.nodeType === 1) {
-                      if (node.tagName && node.tagName.toLowerCase() === 'iframe') {
-                        rewriteIframeSrc(node);
-                      }
-                      if (node.querySelectorAll) {
-                        try {
-                          const iframes = node.querySelectorAll('iframe');
-                          iframes.forEach(rewriteIframeSrc);
-                        } catch (e) {}
-                      }
+      // CRITICAL: Aggressive iframe interception - rewrite ALL iframe srcs immediately
+      // Don't wait for UV - just rewrite using parent window's UV config
+      const rewriteIframeSrc = (iframe) => {
+        try {
+          const src = iframe.getAttribute('src') || iframe.src;
+          if (src && typeof src === 'string' && 
+              !src.includes('/a/') && 
+              !src.startsWith(window.location.origin) &&
+              !src.startsWith('data:') &&
+              !src.startsWith('blob:') &&
+              (src.includes('gamedistribution.com') || 
+               src.includes('html5.gamedistribution.com') ||
+               src.includes('cdn.crazygames.com') ||
+               src.includes('crazygames.com'))) {
+            // Use parent window's UV config to encode
+            const proxiedUrl = `/a/${__uv$config.encodeUrl(src)}`;
+            iframe.src = proxiedUrl;
+            iframe.setAttribute('src', proxiedUrl);
+            iframe.removeAttribute('sandbox');
+            console.log("✅ REWROTE IFRAME:", src.substring(0, 60), "->", proxiedUrl.substring(0, 60));
+            return true;
+          }
+        } catch (e) {
+          console.error("Error rewriting iframe:", e);
+        }
+        return false;
+      };
+      
+      // Set up MutationObserver IMMEDIATELY - don't wait for load
+      const setupObserver = () => {
+        try {
+          const iframeWin = newIframe.contentWindow;
+          const iframeDoc = iframeWin?.document;
+          
+          if (iframeDoc) {
+            // Watch for new iframes
+            const observer = new MutationObserver((mutations) => {
+              mutations.forEach((mutation) => {
+                mutation.addedNodes.forEach((node) => {
+                  if (node.nodeType === 1) {
+                    if (node.tagName && node.tagName.toLowerCase() === 'iframe') {
+                      rewriteIframeSrc(node);
                     }
-                  });
+                    if (node.querySelectorAll) {
+                      try {
+                        const iframes = node.querySelectorAll('iframe');
+                        iframes.forEach(rewriteIframeSrc);
+                      } catch (e) {}
+                    }
+                  }
                 });
               });
-              
-              if (iframeDoc.body) {
-                observer.observe(iframeDoc.body, { childList: true, subtree: true });
-              } else {
-                const bodyObserver = new MutationObserver(() => {
-                  if (iframeDoc.body) {
-                    observer.observe(iframeDoc.body, { childList: true, subtree: true });
-                    bodyObserver.disconnect();
-                  }
-                });
-                bodyObserver.observe(iframeDoc.documentElement, { childList: true });
-              }
-              
-              // Rewrite existing iframes
-              try {
-                const existingIframes = iframeDoc.querySelectorAll('iframe');
-                existingIframes.forEach(rewriteIframeSrc);
-              } catch (e) {}
-              
-              console.log("✅ Iframe observer active");
+            });
+            
+            if (iframeDoc.body) {
+              observer.observe(iframeDoc.body, { childList: true, subtree: true });
+            } else {
+              const bodyObserver = new MutationObserver(() => {
+                if (iframeDoc.body) {
+                  observer.observe(iframeDoc.body, { childList: true, subtree: true });
+                  bodyObserver.disconnect();
+                }
+              });
+              bodyObserver.observe(iframeDoc.documentElement, { childList: true });
             }
-          } catch (e) {
-            console.log("Cannot inject UV scripts (cross-origin):", e);
+            
+            // Rewrite existing iframes immediately
+            try {
+              const existingIframes = iframeDoc.querySelectorAll('iframe');
+              existingIframes.forEach(rewriteIframeSrc);
+            } catch (e) {}
+            
+            console.log("✅ Aggressive iframe observer active");
           }
-        }, 1000);
+        } catch (e) {
+          // Cross-origin - will retry after load
+        }
+      };
+      
+      // Try immediately
+      setupObserver();
+      
+      // Also try after load
+      newIframe.addEventListener("load", () => {
+        setTimeout(setupObserver, 500);
+        setTimeout(setupObserver, 2000);
+        setTimeout(setupObserver, 5000);
       });
+      
+      // Also intercept at the iframe element level - watch for src attribute changes
+      let lastSrc = newIframe.src;
+      const srcObserver = new MutationObserver(() => {
+        const currentSrc = newIframe.src;
+        if (currentSrc !== lastSrc) {
+          lastSrc = currentSrc;
+          // Check if this is a game iframe that needs rewriting
+          if (currentSrc.includes('gamedistribution.com') || currentSrc.includes('html5.gamedistribution.com')) {
+            rewriteIframeSrc(newIframe);
+          }
+        }
+      });
+      srcObserver.observe(newIframe, { attributes: true, attributeFilter: ['src'] });
     } else {
       // Only set timeout for non-game sites
       loadTimeout = setTimeout(() => {
