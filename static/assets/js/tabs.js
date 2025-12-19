@@ -90,43 +90,35 @@ document.addEventListener("DOMContentLoaded", event => {
     const newTab = document.createElement("li");
     const tabTitle = document.createElement("span");
     const newIframe = document.createElement("iframe");
-    // CRITICAL FIX: Remove sandbox entirely for game sites to allow nested iframes
-    // CrazyGames games load in nested iframes that need full access
-    // Sandbox restrictions prevent nested iframes from loading properly
-    // Note: This is necessary for CrazyGames/Poki games to work
-    // Check if this is a game site - if so, remove sandbox completely
-    const checkGameSite = () => {
-      try {
-        const goUrl = sessionStorage.getItem("GoUrl");
-        const url = sessionStorage.getItem("URL");
-        const checkUrl = (goUrl || url || "").toLowerCase();
-        // Decode if it's encoded
-        let decodedUrl = checkUrl;
-        try {
-          if (checkUrl.includes("/a/")) {
-            decodedUrl = decodeURIComponent(checkUrl);
-          }
-        } catch (e) {
-          // Ignore decode errors
-        }
-        return decodedUrl.includes("crazygames") || 
-               decodedUrl.includes("poki") || 
-               decodedUrl.includes("game") ||
-               decodedUrl.includes("play") ||
-               decodedUrl.includes("html5.gamedistribution.com") ||
-               decodedUrl.includes("cdn.crazygames.com");
-      } catch (e) {
-        return false;
-      }
-    };
+    // Get URL first to check if it's a game site BEFORE setting any attributes
+    const goUrl = sessionStorage.getItem("GoUrl");
+    const url = sessionStorage.getItem("URL");
+    const checkUrl = (goUrl || url || "").toLowerCase();
     
-    // Only apply sandbox for non-game sites (security)
-    // For game sites, NO SANDBOX = allows nested iframes to work
-    if (!checkGameSite()) {
+    // Decode URL if needed
+    let decodedUrl = checkUrl;
+    try {
+      if (checkUrl.includes("/a/")) {
+        decodedUrl = decodeURIComponent(checkUrl);
+      }
+    } catch (e) {}
+    
+    // Check if this is a game site (CrazyGames, Poki, or game distribution)
+    const isGameSite = decodedUrl.includes("crazygames") || 
+                       decodedUrl.includes("poki") || 
+                       decodedUrl.includes("html5.gamedistribution.com") ||
+                       decodedUrl.includes("cdn.crazygames.com") ||
+                       decodedUrl.includes("gamedistribution.com") ||
+                       decodedUrl.includes("games.crazygames.com");
+    
+    // CRITICAL: For game sites, NO SANDBOX AT ALL - this is essential for nested iframes
+    // Games load in nested iframes from gamedistribution.com that need full access
+    if (!isGameSite) {
+      // Only apply sandbox for non-game sites (security)
       newIframe.sandbox =
         "allow-same-origin allow-scripts allow-forms allow-pointer-lock allow-modals allow-orientation-lock allow-popups allow-popups-to-escape-sandbox allow-downloads allow-presentation allow-top-navigation-by-user-activation allow-top-navigation";
     }
-    // For game sites: no sandbox attribute = full access for nested game iframes
+    // For game sites: NO sandbox = allows nested game iframes to load properly
     
     newIframe.allow = "fullscreen; microphone; camera; autoplay; encrypted-media; picture-in-picture; geolocation; payment; usb; xr-spatial-tracking";
     newIframe.setAttribute("referrerpolicy", "no-referrer-when-downgrade");
@@ -276,7 +268,13 @@ document.addEventListener("DOMContentLoaded", event => {
     // Update game site detection with the actual URL
     const isGameSiteFinal = isGameSiteUrl(finalUrl || newIframe.dataset.tabUrl || "");
     
-    // Set src AFTER detection
+    // CRITICAL: For game sites, ensure sandbox is completely removed BEFORE setting src
+    if (isGameSiteFinal) {
+      newIframe.removeAttribute("sandbox");
+      console.log("Game site detected - sandbox removed for nested iframes");
+    }
+    
+    // Set src AFTER sandbox is properly configured
     newIframe.src = finalUrl;
     
     // If it's a game site, completely disable all error handling
