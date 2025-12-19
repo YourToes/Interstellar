@@ -290,141 +290,265 @@ document.addEventListener("DOMContentLoaded", event => {
       loadTimeout = null;
       console.log("Game site detected - error handling disabled");
       
-      // CRITICAL: Inject script into proxied page to intercept iframe creation
-      // This MUST use UV's rewriteUrl from within the proxied page context
-      newIframe.addEventListener("load", () => {
-        setTimeout(() => {
-          try {
-            const iframeWin = newIframe.contentWindow;
-            const iframeDoc = iframeWin?.document;
-            if (iframeDoc && iframeDoc.head) {
-              // Inject script that uses UV's rewriteUrl from the proxied page's UV instance
-              const script = iframeDoc.createElement('script');
-              script.textContent = `
-                (function() {
-                  // Wait for UV to be available in this window
-                  let uvReady = false;
-                  const checkUV = setInterval(() => {
-                    if (window.__uv && window.__uv.rewriteUrl) {
-                      uvReady = true;
-                      clearInterval(checkUV);
-                      startInterception();
-                    }
-                  }, 100);
-                  
-                  // Timeout after 5 seconds
-                  setTimeout(() => {
-                    if (!uvReady) {
-                      clearInterval(checkUV);
-                      console.warn("UV not available for iframe interception");
-                    }
-                  }, 5000);
-                  
-                  function startInterception() {
-                    // Intercept createElement to catch iframe creation
-                    const originalCreateElement = document.createElement.bind(document);
-                    document.createElement = function(tagName, options) {
-                      const element = originalCreateElement(tagName, options);
-                      if (tagName && tagName.toLowerCase() === 'iframe') {
-                        // Intercept src property
-                        let iframeSrc = '';
-                        Object.defineProperty(element, 'src', {
-                          get: function() { return iframeSrc; },
-                          set: function(value) {
-                            iframeSrc = value;
-                            if (value && typeof value === 'string' && 
-                                !value.includes('/a/') && 
-                                !value.startsWith(window.location.origin) &&
-                                !value.startsWith('data:') &&
-                                !value.startsWith('blob:') &&
-                                (value.includes('gamedistribution.com') || 
-                                 value.includes('html5.gamedistribution.com') ||
-                                 value.includes('cdn.crazygames.com'))) {
-                              // Use UV to rewrite the URL
-                              try {
-                                const proxiedUrl = window.__uv.rewriteUrl(value);
-                                element.setAttribute('src', proxiedUrl);
-                                console.log("✅ UV rewrote game iframe src:", value.substring(0, 60));
-                              } catch (e) {
-                                console.error("Error rewriting iframe src:", e);
-                                element.setAttribute('src', value);
-                              }
-                              element.removeAttribute('sandbox');
-                              return;
-                            }
-                            element.setAttribute('src', value);
-                          },
-                          configurable: true
+      // CRITICAL: Inject script IMMEDIATELY to intercept iframe creation
+      // Start interception right away, don't wait for UV
+      try {
+        const iframeWin = newIframe.contentWindow;
+        if (iframeWin) {
+          // Inject immediately, before page loads
+          const script = document.createElement('script');
+          script.textContent = `
+            (function() {
+              // Helper function to proxy URLs - works with or without UV
+              function proxyUrl(url) {
+                if (!url || typeof url !== 'string') return url;
+                if (url.includes('/a/') || url.startsWith(window.location.origin)) return url;
+                if (url.startsWith('data:') || url.startsWith('blob:')) return url;
+                
+                // Try UV first (from proxied page's UV instance)
+                if (window.__uv && window.__uv.rewriteUrl) {
+                  try {
+                    return window.__uv.rewriteUrl(url);
+                  } catch (e) {
+                    console.warn("UV rewriteUrl failed, trying parent:", e);
+                  }
+                }
+                
+                // Try parent window's UV config (fallback)
+                try {
+                  if (window.parent && window.parent.__uv$config && window.parent.__uv$config.encodeUrl) {
+                    return '/a/' + window.parent.__uv$config.encodeUrl(url);
+                  }
+                } catch (e) {
+                  console.warn("Parent UV config not accessible:", e);
+                }
+                
+                // Last resort: try to access UV config from top window
+                try {
+                  if (window.top && window.top !== window && window.top.__uv$config && window.top.__uv$config.encodeUrl) {
+                    return '/a/' + window.top.__uv$config.encodeUrl(url);
+                  }
+                } catch (e) {
+                  console.warn("Top window UV config not accessible:", e);
+                }
+                
+                // Final fallback: base64-like encoding (not perfect but better than nothing)
+                try {
+                  const encoded = btoa(encodeURIComponent(url)).replace(/[+/=]/g, function(m) {
+                    return {'+': '-', '/': '_', '=': '.'}[m];
+                  });
+                  return '/a/' + encoded;
+                } catch (e) {
+                  console.error("All encoding methods failed:", e);
+                  return url;
+                }
+              }
+              
+              // Start interception IMMEDIATELY - don't wait for anything
+              function startInterception() {
+                // Intercept createElement FIRST - this catches iframes before they're created
+                const originalCreateElement = document.createElement.bind(document);
+                document.createElement = function(tagName, options) {
+                  const element = originalCreateElement(tagName, options);
+                  if (tagName && tagName.toLowerCase() === 'iframe') {
+                    // Intercept src property immediately
+                    let iframeSrc = '';
+                    Object.defineProperty(element, 'src', {
+                      get: function() { return iframeSrc; },
+                      set: function(value) {
+                        iframeSrc = value;
+                        if (value && typeof value === 'string' && 
+                            (value.includes('gamedistribution.com') || 
+                             value.includes('html5.gamedistribution.com') ||
+                             value.includes('cdn.crazygames.com') ||
+                             value.includes('crazygames.com/game/'))) {
+                          const proxiedUrl = proxyUrl(value);
+                          element.setAttribute('src', proxiedUrl);
+                          element.removeAttribute('sandbox');
+                          console.log("✅ Intercepted iframe src:", value.substring(0, 60), "->", proxiedUrl.substring(0, 60));
+                          return;
+                        }
+                        element.setAttribute('src', value);
+                      },
+                      configurable: true
+                    });
+                    element.removeAttribute('sandbox');
+                  }
+                  return element;
+                };
+                
+                // Intercept setAttribute
+                const originalSetAttribute = Element.prototype.setAttribute;
+                Element.prototype.setAttribute = function(name, value) {
+                  if (this.tagName && this.tagName.toLowerCase() === 'iframe' && 
+                      name === 'src' && 
+                      typeof value === 'string' &&
+                      (value.includes('gamedistribution.com') || 
+                       value.includes('html5.gamedistribution.com') ||
+                       value.includes('cdn.crazygames.com'))) {
+                    value = proxyUrl(value);
+                    this.removeAttribute('sandbox');
+                  }
+                  return originalSetAttribute.call(this, name, value);
+                };
+                
+                // Intercept innerHTML to catch iframes created via HTML strings
+                const originalInnerHTML = Object.getOwnPropertyDescriptor(Element.prototype, 'innerHTML');
+                if (originalInnerHTML && originalInnerHTML.set) {
+                  Object.defineProperty(Element.prototype, 'innerHTML', {
+                    get: originalInnerHTML.get,
+                    set: function(value) {
+                      if (typeof value === 'string' && value.includes('<iframe')) {
+                        // Rewrite iframe src attributes in HTML string
+                        value = value.replace(/<iframe([^>]*)src=["']([^"']+)["']([^>]*)>/gi, function(match, before, src, after) {
+                          if (src.includes('gamedistribution.com') || 
+                              src.includes('html5.gamedistribution.com') ||
+                              src.includes('cdn.crazygames.com')) {
+                            const proxiedSrc = proxyUrl(src);
+                            return '<iframe' + before + 'src="' + proxiedSrc + '"' + after + ' sandbox="">';
+                          }
+                          return match;
                         });
-                        element.removeAttribute('sandbox');
                       }
-                      return element;
-                    };
-                    
-                    // Also intercept setAttribute for iframes
-                    const originalSetAttribute = Element.prototype.setAttribute;
-                    Element.prototype.setAttribute = function(name, value) {
-                      if (this.tagName && this.tagName.toLowerCase() === 'iframe' && 
-                          name === 'src' && 
-                          typeof value === 'string' &&
-                          !value.includes('/a/') &&
-                          !value.startsWith(window.location.origin) &&
-                          (value.includes('gamedistribution.com') || 
-                           value.includes('html5.gamedistribution.com'))) {
-                        try {
-                          value = window.__uv.rewriteUrl(value);
-                          this.removeAttribute('sandbox');
-                        } catch (e) {
-                          console.error("Error rewriting iframe src attribute:", e);
+                      return originalInnerHTML.set.call(this, value);
+                    },
+                    configurable: true,
+                    enumerable: originalInnerHTML.enumerable
+                  });
+                }
+                
+                // Intercept insertAdjacentHTML
+                const originalInsertAdjacentHTML = Element.prototype.insertAdjacentHTML;
+                Element.prototype.insertAdjacentHTML = function(position, html) {
+                  if (typeof html === 'string' && html.includes('<iframe')) {
+                    html = html.replace(/<iframe([^>]*)src=["']([^"']+)["']([^>]*)>/gi, function(match, before, src, after) {
+                      if (src.includes('gamedistribution.com') || 
+                          src.includes('html5.gamedistribution.com') ||
+                          src.includes('cdn.crazygames.com')) {
+                        const proxiedSrc = proxyUrl(src);
+                        return '<iframe' + before + 'src="' + proxiedSrc + '"' + after + ' sandbox="">';
+                      }
+                      return match;
+                    });
+                  }
+                  return originalInsertAdjacentHTML.call(this, position, html);
+                };
+                
+                // Aggressive MutationObserver - watch everything
+                const observer = new MutationObserver((mutations) => {
+                  mutations.forEach((mutation) => {
+                    mutation.addedNodes.forEach((node) => {
+                      if (node.nodeType === 1) {
+                        // Check if node itself is an iframe
+                        if (node.tagName && node.tagName.toLowerCase() === 'iframe') {
+                          const src = node.getAttribute('src') || node.src;
+                          if (src && typeof src === 'string' && 
+                              (src.includes('gamedistribution.com') || 
+                               src.includes('html5.gamedistribution.com') ||
+                               src.includes('cdn.crazygames.com'))) {
+                            const proxiedUrl = proxyUrl(src);
+                            node.src = proxiedUrl;
+                            node.setAttribute('src', proxiedUrl);
+                            node.removeAttribute('sandbox');
+                            console.log("✅ MutationObserver caught iframe:", src.substring(0, 60));
+                          }
+                        }
+                        // Check for nested iframes
+                        if (node.querySelectorAll) {
+                          const iframes = node.querySelectorAll('iframe');
+                          iframes.forEach((iframe) => {
+                            const src = iframe.getAttribute('src') || iframe.src;
+                            if (src && typeof src === 'string' && 
+                                (src.includes('gamedistribution.com') || 
+                                 src.includes('html5.gamedistribution.com') ||
+                                 src.includes('cdn.crazygames.com'))) {
+                              const proxiedUrl = proxyUrl(src);
+                              iframe.src = proxiedUrl;
+                              iframe.setAttribute('src', proxiedUrl);
+                              iframe.removeAttribute('sandbox');
+                              console.log("✅ MutationObserver caught nested iframe:", src.substring(0, 60));
+                            }
+                          });
                         }
                       }
-                      return originalSetAttribute.call(this, name, value);
-                    };
-                    
-                    // MutationObserver as backup
-                    const observer = new MutationObserver((mutations) => {
-                      mutations.forEach((mutation) => {
-                        mutation.addedNodes.forEach((node) => {
-                          if (node.nodeType === 1 && node.tagName && node.tagName.toLowerCase() === 'iframe') {
-                            const src = node.getAttribute('src') || node.src;
-                            if (src && typeof src === 'string' && 
-                                !src.includes('/a/') &&
-                                !src.startsWith(window.location.origin) &&
-                                (src.includes('gamedistribution.com') || 
-                                 src.includes('html5.gamedistribution.com'))) {
-                              try {
-                                const proxiedUrl = window.__uv.rewriteUrl(src);
-                                node.src = proxiedUrl;
-                                node.setAttribute('src', proxiedUrl);
-                                node.removeAttribute('sandbox');
-                                console.log("✅ MutationObserver rewrote game iframe:", src.substring(0, 60));
-                              } catch (e) {
-                                console.error("Error in MutationObserver:", e);
-                              }
-                            }
-                          }
-                        });
-                      });
                     });
-                    
-                    observer.observe(document.body || document.documentElement, {
-                      childList: true,
-                      subtree: true
-                    });
-                    
-                    console.log("✅ Iframe interceptor installed in proxied page");
+                  });
+                });
+                
+                // Start observing immediately
+                if (document.body) {
+                  observer.observe(document.body, { childList: true, subtree: true });
+                } else {
+                  // Wait for body to exist
+                  const bodyObserver = new MutationObserver(() => {
+                    if (document.body) {
+                      observer.observe(document.body, { childList: true, subtree: true });
+                      bodyObserver.disconnect();
+                    }
+                  });
+                  bodyObserver.observe(document.documentElement, { childList: true });
+                }
+                
+                console.log("✅ Iframe interceptor installed IMMEDIATELY");
+              }
+              
+              // Start immediately if DOM is ready, otherwise wait
+              if (document.readyState === 'loading') {
+                document.addEventListener('DOMContentLoaded', startInterception);
+              } else {
+                startInterception();
+              }
+              
+              // Also try after a short delay to catch late-loading scripts
+              setTimeout(startInterception, 100);
+            })();
+          `;
+          
+          // Try to inject into the iframe's document if accessible
+          try {
+            const iframeDoc = iframeWin.document;
+            if (iframeDoc && iframeDoc.head) {
+              iframeDoc.head.appendChild(iframeDoc.createElement('script')).textContent = script.textContent;
+            } else {
+              // Iframe not ready yet, wait for load event
+              newIframe.addEventListener("load", () => {
+                setTimeout(() => {
+                  try {
+                    const doc = newIframe.contentDocument || newIframe.contentWindow?.document;
+                    if (doc && doc.head) {
+                      const injectedScript = doc.createElement('script');
+                      injectedScript.textContent = script.textContent;
+                      doc.head.appendChild(injectedScript);
+                      console.log("✅ Injected iframe interceptor after load");
+                    }
+                  } catch (e) {
+                    console.log("Cannot inject script (cross-origin):", e);
                   }
-                })();
-              `;
-              iframeDoc.head.appendChild(script);
-              console.log("✅ Injected iframe interceptor script into game site");
+                }, 100);
+              });
             }
           } catch (e) {
-            // Cross-origin - UV handler should handle it via contentWindow hook
-            console.log("Cannot inject script (cross-origin, UV will handle):", e);
+            // Cross-origin - wait for load event
+            newIframe.addEventListener("load", () => {
+              setTimeout(() => {
+                try {
+                  const doc = newIframe.contentDocument || newIframe.contentWindow?.document;
+                  if (doc && doc.head) {
+                    const injectedScript = doc.createElement('script');
+                    injectedScript.textContent = script.textContent;
+                    doc.head.appendChild(injectedScript);
+                    console.log("✅ Injected iframe interceptor after load (cross-origin)");
+                  }
+                } catch (e2) {
+                  console.log("Cannot inject script:", e2);
+                }
+              }, 100);
+            });
           }
-        }, 2000); // Wait 2 seconds for page to load
-      });
+        }
+      } catch (e) {
+        console.log("Error setting up iframe interceptor:", e);
+      }
     } else {
       // Only set timeout for non-game sites
       loadTimeout = setTimeout(() => {
