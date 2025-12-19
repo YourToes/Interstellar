@@ -282,26 +282,100 @@ document.addEventListener("DOMContentLoaded", event => {
     // UV will automatically rewrite the URL if needed
     newIframe.src = finalUrl;
     
-    // CRITICAL: For game sites, access contentWindow/contentDocument IMMEDIATELY
-    // This forces UV to inject its handler into the proxied page
+    // CRITICAL: Inject script IMMEDIATELY into proxied page to intercept iframe creation
+    // This runs BEFORE the page loads, so it can intercept everything
     if (isGameSiteFinal) {
-      try {
-        // Access contentWindow to trigger UV injection
-        const win = newIframe.contentWindow;
-        if (win) {
-          console.log("✅ Accessed contentWindow - UV should inject");
-        }
-        // Also try contentDocument
-        try {
-          const doc = newIframe.contentDocument;
-          if (doc) {
-            console.log("✅ Accessed contentDocument - UV injected");
+      // Use srcdoc to inject script before page loads
+      const originalSrc = finalUrl;
+      const injectionScript = `
+        <script>
+        (function() {
+          // Inject UV config immediately
+          if (!window.__uv$config) {
+            window.__uv$config = {
+              prefix: "/a/",
+              bare: "/ov/",
+              encodeUrl: Ultraviolet ? Ultraviolet.codec.xor.encode : function(url) {
+                return btoa(encodeURIComponent(url)).replace(/[+/=]/g, function(m) {
+                  return {'+': '-', '/': '_', '=': '.'}[m];
+                });
+              },
+              decodeUrl: Ultraviolet ? Ultraviolet.codec.xor.decode : function(url) {
+                return decodeURIComponent(atob(url.replace(/[-_.]/g, function(m) {
+                  return {'-': '+', '_': '/', '.': '='}[m];
+                })));
+              },
+              handler: "/assets/-uv/handler.js?v=6-17-2024",
+              bundle: "/assets/-uv/bundle.js?v=6-17-2024",
+              config: "/assets/-uv/config.js?v=6-17-2024",
+              sw: "/assets/-uv/sw.js?v=6-17-2024"
+            };
           }
-        } catch (e) {
-          // Cross-origin - will be handled after load
+          
+          // Hook into HTMLIFrameElement.prototype IMMEDIATELY
+          const originalSrcDescriptor = Object.getOwnPropertyDescriptor(HTMLIFrameElement.prototype, 'src');
+          if (originalSrcDescriptor && originalSrcDescriptor.set) {
+            Object.defineProperty(HTMLIFrameElement.prototype, 'src', {
+              get: originalSrcDescriptor.get,
+              set: function(value) {
+                if (value && typeof value === 'string' && 
+                    !value.includes('/a/') && 
+                    !value.startsWith(window.location.origin) &&
+                    !value.startsWith('data:') &&
+                    !value.startsWith('blob:') &&
+                    (value.includes('gamedistribution.com') || 
+                     value.includes('html5.gamedistribution.com') ||
+                     value.includes('cdn.crazygames.com'))) {
+                  try {
+                    const proxiedUrl = '/a/' + (window.__uv$config.encodeUrl(value));
+                    originalSrcDescriptor.set.call(this, proxiedUrl);
+                    this.removeAttribute('sandbox');
+                    console.log("✅ INJECTED SCRIPT INTERCEPTED:", value.substring(0, 60));
+                    return;
+                  } catch (e) {
+                    console.error("Error in injected script:", e);
+                  }
+                }
+                originalSrcDescriptor.set.call(this, value);
+              },
+              configurable: true,
+              enumerable: originalSrcDescriptor.enumerable
+            });
+            console.log("✅ Injected script hooked into HTMLIFrameElement.prototype.src");
+          }
+        })();
+        </script>
+      `;
+      
+      // Try to inject via srcdoc if possible, otherwise wait for load
+      try {
+        const iframeWin = newIframe.contentWindow;
+        if (iframeWin && iframeWin.document) {
+          const doc = iframeWin.document;
+          if (doc.head) {
+            const script = doc.createElement('script');
+            script.textContent = injectionScript.replace(/<\/?script>/g, '');
+            doc.head.insertBefore(script, doc.head.firstChild);
+            console.log("✅ Injected script into proxied page head");
+          }
         }
       } catch (e) {
-        console.log("Cannot access contentWindow yet:", e);
+        // Cross-origin - inject after load
+        newIframe.addEventListener("load", () => {
+          setTimeout(() => {
+            try {
+              const doc = newIframe.contentDocument || newIframe.contentWindow?.document;
+              if (doc && doc.head) {
+                const script = doc.createElement('script');
+                script.textContent = injectionScript.replace(/<\/?script>/g, '');
+                doc.head.insertBefore(script, doc.head.firstChild);
+                console.log("✅ Injected script after load");
+              }
+            } catch (e2) {
+              console.log("Cannot inject script:", e2);
+            }
+          }, 100);
+        });
       }
     }
     
