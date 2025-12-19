@@ -177,47 +177,51 @@ document.addEventListener("DOMContentLoaded", event => {
           };
           
           // CRITICAL: Intercept iframe creation inside CrazyGames pages
-          // This ensures nested game iframes are proxied
+          // This ensures nested game iframes created by "Play" button are proxied
           try {
-            const iframeProto = newIframe.contentWindow.HTMLIFrameElement?.prototype;
-            if (iframeProto && newIframe.contentWindow.document) {
-              // Intercept createElement for iframes
-              const originalCreateElement = newIframe.contentWindow.document.createElement;
-              newIframe.contentWindow.document.createElement = function(tagName, options) {
-                const element = originalCreateElement.call(this, tagName, options);
-                if (tagName.toLowerCase() === 'iframe') {
-                  // Intercept src setter for dynamically created iframes
-                  let iframeSrc = '';
-                  Object.defineProperty(element, 'src', {
-                    get: function() {
-                      return iframeSrc;
-                    },
-                    set: function(value) {
-                      iframeSrc = value;
-                      // If it's a game URL, proxy it
-                      if (value && typeof value === 'string') {
-                        if (value.includes('gamedistribution.com') || 
-                            value.includes('crazygames.com') ||
-                            !value.startsWith(window.location.origin)) {
-                          // Proxy the iframe src
-                          if (!value.includes('/a/')) {
+            // Wait for page to load before intercepting
+            setTimeout(() => {
+              try {
+                const iframeDoc = newIframe.contentDocument || newIframe.contentWindow?.document;
+                if (iframeDoc && iframeDoc.createElement) {
+                  const originalCreateElement = iframeDoc.createElement.bind(iframeDoc);
+                  iframeDoc.createElement = function(tagName, options) {
+                    const element = originalCreateElement(tagName, options);
+                    if (tagName && tagName.toLowerCase() === 'iframe') {
+                      // Intercept src setter for game iframes
+                      let iframeSrc = '';
+                      Object.defineProperty(element, 'src', {
+                        get: function() { return iframeSrc; },
+                        set: function(value) {
+                          iframeSrc = value;
+                          if (value && typeof value === 'string' && 
+                              (value.includes('gamedistribution.com') || 
+                               value.includes('crazygames.com')) &&
+                              !value.includes('/a/') && 
+                              !value.startsWith(window.location.origin)) {
+                            // Proxy the nested iframe URL
                             const proxiedUrl = `/a/${__uv$config.encodeUrl(value)}`;
                             element.setAttribute('src', proxiedUrl);
+                            console.log("✅ Intercepted and proxied game iframe:", value.substring(0, 50) + "...");
                             return;
                           }
-                        }
-                      }
-                      element.setAttribute('src', value);
-                    },
-                    configurable: true,
-                    enumerable: true
-                  });
+                          element.setAttribute('src', value);
+                        },
+                        configurable: true
+                      });
+                      // Remove sandbox for game iframes
+                      element.removeAttribute('sandbox');
+                    }
+                    return element;
+                  };
+                  console.log("✅ Iframe creation interceptor installed");
                 }
-                return element;
-              };
-            }
+              } catch (e) {
+                console.log("Could not intercept iframe creation (cross-origin):", e);
+              }
+            }, 2000); // Wait 2 seconds for page to load
           } catch (e) {
-            console.log("Could not intercept iframe creation (may be cross-origin):", e);
+            console.log("Error setting up iframe interceptor:", e);
           }
         }
         if (newIframe.contentDocument?.documentElement?.outerHTML?.trim().length > 0) {
@@ -330,9 +334,52 @@ document.addEventListener("DOMContentLoaded", event => {
       loadTimeout = null;
       console.log("Game site detected - error handling disabled");
       
-      // Set up monitoring for nested iframes after page loads
+      // CRITICAL: Monitor for dynamically created iframes after page loads
+      // This catches game iframes created when "Play" button is clicked
       newIframe.addEventListener("load", () => {
-        setTimeout(monitorNestedIframes, 1000);
+        setTimeout(() => {
+          try {
+            const iframeDoc = newIframe.contentDocument || newIframe.contentWindow?.document;
+            if (iframeDoc) {
+              // Use MutationObserver to watch for new iframes being added
+              const observer = new MutationObserver((mutations) => {
+                mutations.forEach((mutation) => {
+                  mutation.addedNodes.forEach((node) => {
+                    if (node.nodeType === 1) { // Element node
+                      const iframes = node.tagName === 'IFRAME' ? [node] : 
+                                     (node.querySelectorAll ? Array.from(node.querySelectorAll('iframe')) : []);
+                      iframes.forEach((iframe) => {
+                        const src = iframe.getAttribute('src') || iframe.src;
+                        if (src && typeof src === 'string' && 
+                            !src.includes('/a/') && 
+                            !src.startsWith(window.location.origin) &&
+                            (src.includes('gamedistribution.com') || 
+                             src.includes('crazygames.com') ||
+                             src.includes('html5.gamedistribution.com'))) {
+                          // Proxy the nested iframe
+                          const proxiedSrc = `/a/${__uv$config.encodeUrl(src)}`;
+                          iframe.src = proxiedSrc;
+                          iframe.setAttribute('src', proxiedSrc);
+                          // Remove sandbox if present
+                          iframe.removeAttribute('sandbox');
+                          console.log("✅ Proxied nested game iframe:", src.substring(0, 50) + "...");
+                        }
+                      });
+                    }
+                  });
+                });
+              });
+              observer.observe(iframeDoc.body || iframeDoc.documentElement, {
+                childList: true,
+                subtree: true
+              });
+              console.log("✅ Nested iframe monitor active for game site");
+            }
+          } catch (e) {
+            // Cross-origin - can't access document, UV handler should handle it
+            console.log("Cannot monitor nested iframes (cross-origin, UV will handle):", e);
+          }
+        }, 3000); // Wait 3 seconds for CrazyGames page to fully load
       });
     } else {
       // Only set timeout for non-game sites
