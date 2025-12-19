@@ -290,52 +290,140 @@ document.addEventListener("DOMContentLoaded", event => {
       loadTimeout = null;
       console.log("Game site detected - error handling disabled");
       
-      // CRITICAL: Monitor for dynamically created iframes after page loads
-      // This catches game iframes created when "Play" button is clicked
+      // CRITICAL: Inject script into proxied page to intercept iframe creation
+      // This MUST use UV's rewriteUrl from within the proxied page context
       newIframe.addEventListener("load", () => {
         setTimeout(() => {
           try {
-            const iframeDoc = newIframe.contentDocument || newIframe.contentWindow?.document;
-            if (iframeDoc) {
-              // Use MutationObserver to watch for new iframes being added
-              const observer = new MutationObserver((mutations) => {
-                mutations.forEach((mutation) => {
-                  mutation.addedNodes.forEach((node) => {
-                    if (node.nodeType === 1) { // Element node
-                      const iframes = node.tagName === 'IFRAME' ? [node] : 
-                                     (node.querySelectorAll ? Array.from(node.querySelectorAll('iframe')) : []);
-                      iframes.forEach((iframe) => {
-                        const src = iframe.getAttribute('src') || iframe.src;
-                        if (src && typeof src === 'string' && 
-                            !src.includes('/a/') && 
-                            !src.startsWith(window.location.origin) &&
-                            (src.includes('gamedistribution.com') || 
-                             src.includes('crazygames.com') ||
-                             src.includes('html5.gamedistribution.com'))) {
-                          // Proxy the nested iframe
-                          const proxiedSrc = `/a/${__uv$config.encodeUrl(src)}`;
-                          iframe.src = proxiedSrc;
-                          iframe.setAttribute('src', proxiedSrc);
-                          // Remove sandbox if present
-                          iframe.removeAttribute('sandbox');
-                          console.log("✅ Proxied nested game iframe:", src.substring(0, 50) + "...");
-                        }
-                      });
+            const iframeWin = newIframe.contentWindow;
+            const iframeDoc = iframeWin?.document;
+            if (iframeDoc && iframeDoc.head) {
+              // Inject script that uses UV's rewriteUrl from the proxied page's UV instance
+              const script = iframeDoc.createElement('script');
+              script.textContent = `
+                (function() {
+                  // Wait for UV to be available in this window
+                  let uvReady = false;
+                  const checkUV = setInterval(() => {
+                    if (window.__uv && window.__uv.rewriteUrl) {
+                      uvReady = true;
+                      clearInterval(checkUV);
+                      startInterception();
                     }
-                  });
-                });
-              });
-              observer.observe(iframeDoc.body || iframeDoc.documentElement, {
-                childList: true,
-                subtree: true
-              });
-              console.log("✅ Nested iframe monitor active for game site");
+                  }, 100);
+                  
+                  // Timeout after 5 seconds
+                  setTimeout(() => {
+                    if (!uvReady) {
+                      clearInterval(checkUV);
+                      console.warn("UV not available for iframe interception");
+                    }
+                  }, 5000);
+                  
+                  function startInterception() {
+                    // Intercept createElement to catch iframe creation
+                    const originalCreateElement = document.createElement.bind(document);
+                    document.createElement = function(tagName, options) {
+                      const element = originalCreateElement(tagName, options);
+                      if (tagName && tagName.toLowerCase() === 'iframe') {
+                        // Intercept src property
+                        let iframeSrc = '';
+                        Object.defineProperty(element, 'src', {
+                          get: function() { return iframeSrc; },
+                          set: function(value) {
+                            iframeSrc = value;
+                            if (value && typeof value === 'string' && 
+                                !value.includes('/a/') && 
+                                !value.startsWith(window.location.origin) &&
+                                !value.startsWith('data:') &&
+                                !value.startsWith('blob:') &&
+                                (value.includes('gamedistribution.com') || 
+                                 value.includes('html5.gamedistribution.com') ||
+                                 value.includes('cdn.crazygames.com'))) {
+                              // Use UV to rewrite the URL
+                              try {
+                                const proxiedUrl = window.__uv.rewriteUrl(value);
+                                element.setAttribute('src', proxiedUrl);
+                                console.log("✅ UV rewrote game iframe src:", value.substring(0, 60));
+                              } catch (e) {
+                                console.error("Error rewriting iframe src:", e);
+                                element.setAttribute('src', value);
+                              }
+                              element.removeAttribute('sandbox');
+                              return;
+                            }
+                            element.setAttribute('src', value);
+                          },
+                          configurable: true
+                        });
+                        element.removeAttribute('sandbox');
+                      }
+                      return element;
+                    };
+                    
+                    // Also intercept setAttribute for iframes
+                    const originalSetAttribute = Element.prototype.setAttribute;
+                    Element.prototype.setAttribute = function(name, value) {
+                      if (this.tagName && this.tagName.toLowerCase() === 'iframe' && 
+                          name === 'src' && 
+                          typeof value === 'string' &&
+                          !value.includes('/a/') &&
+                          !value.startsWith(window.location.origin) &&
+                          (value.includes('gamedistribution.com') || 
+                           value.includes('html5.gamedistribution.com'))) {
+                        try {
+                          value = window.__uv.rewriteUrl(value);
+                          this.removeAttribute('sandbox');
+                        } catch (e) {
+                          console.error("Error rewriting iframe src attribute:", e);
+                        }
+                      }
+                      return originalSetAttribute.call(this, name, value);
+                    };
+                    
+                    // MutationObserver as backup
+                    const observer = new MutationObserver((mutations) => {
+                      mutations.forEach((mutation) => {
+                        mutation.addedNodes.forEach((node) => {
+                          if (node.nodeType === 1 && node.tagName && node.tagName.toLowerCase() === 'iframe') {
+                            const src = node.getAttribute('src') || node.src;
+                            if (src && typeof src === 'string' && 
+                                !src.includes('/a/') &&
+                                !src.startsWith(window.location.origin) &&
+                                (src.includes('gamedistribution.com') || 
+                                 src.includes('html5.gamedistribution.com'))) {
+                              try {
+                                const proxiedUrl = window.__uv.rewriteUrl(src);
+                                node.src = proxiedUrl;
+                                node.setAttribute('src', proxiedUrl);
+                                node.removeAttribute('sandbox');
+                                console.log("✅ MutationObserver rewrote game iframe:", src.substring(0, 60));
+                              } catch (e) {
+                                console.error("Error in MutationObserver:", e);
+                              }
+                            }
+                          }
+                        });
+                      });
+                    });
+                    
+                    observer.observe(document.body || document.documentElement, {
+                      childList: true,
+                      subtree: true
+                    });
+                    
+                    console.log("✅ Iframe interceptor installed in proxied page");
+                  }
+                })();
+              `;
+              iframeDoc.head.appendChild(script);
+              console.log("✅ Injected iframe interceptor script into game site");
             }
           } catch (e) {
-            // Cross-origin - can't access document, UV handler should handle it
-            console.log("Cannot monitor nested iframes (cross-origin, UV will handle):", e);
+            // Cross-origin - UV handler should handle it via contentWindow hook
+            console.log("Cannot inject script (cross-origin, UV will handle):", e);
           }
-        }, 3000); // Wait 3 seconds for CrazyGames page to fully load
+        }, 2000); // Wait 2 seconds for page to load
       });
     } else {
       // Only set timeout for non-game sites
